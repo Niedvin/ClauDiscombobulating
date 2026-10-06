@@ -101,3 +101,12 @@ test('a precompute compact does not hold the auto compact', { timeoutMs: 20000 }
   await clock.advance(3000)
   expect(ran).toEqual(['effort low', 'compact', 'effort high'])
 })
+
+test('a subagent turn does not clear isBusy: 99% still aborts the main turn', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const ran = await setup($, on, true)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 's1', reason: 'answer', agentId: 'a1' })
+  await $.session.measure(measure(99))
+  await clock.advance(3000)
+  expect(ran).toEqual(['abort t1', 'effort low', 'compact', 'effort high'])
+})

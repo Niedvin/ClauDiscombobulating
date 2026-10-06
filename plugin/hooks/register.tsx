@@ -213,6 +213,12 @@ async function alertCache($: EngineInterface) {
   await $.audio.play({ asset: 'assets/cache-alert.mp3' }).catch(err => note($, `alert failed ${String(err)}`))
 }
 
+// quiet at 99%+ limits and until 5 messages pass after a compact — 2026-10-06
+async function alertQuiet($: EngineInterface) {
+  const five = (await read($, limits)).find(l => l.kind === 'five_hour')
+  return (five?.percentUsed ?? 0) >= AUTO_COMPACT_AT || (await read($, sinceCompact)) < COMPACT_QUIET_MSGS
+}
+
 function clockOf(iso: string) {
   const d = new Date(iso)
   const isFar = d.getTime() - Date.now() > 86400000
@@ -263,7 +269,7 @@ async function fireTimer($: EngineInterface) {
   await $.prompt.submit({ text: t.text || tr.defaultText, asUser: true })
 }
 
-async function compact($: EngineInterface) {
+async function compact($: EngineInterface): Promise<boolean> {
   const model = await $.session.model()
   // live is only polled in full mode, so desktop reads the effort from the app flag or saved settings — 2026-10-06
   const flagged = ((await $.settings.read({ source: 'flag' })) as SavedSettings).effortLevel
@@ -282,9 +288,14 @@ async function compact($: EngineInterface) {
     const doneAt = await $.clock.now()
     await update($, compactedAt, () => doneAt)
     await update($, sinceCompact, () => 0)
+    return true
   } catch (err) {
     $.ui.toast(tr.compactFailed)
     await note($, `compact failed ${String(err)}`)
+    // hold the grace so a failed attempt is retried after it, not every tick — 2026-10-06
+    const failAt = await $.clock.now()
+    await update($, compactedAt, () => failAt)
+    return false
   } finally {
     if (isSwitch) {
       await $.command.run({ command: 'model', args: fam?.id ?? model }).catch(() => undefined)
@@ -306,19 +317,19 @@ async function autoCompact($: EngineInterface) {
   lastCheck = now
   lastPercent = five?.percentUsed ?? 0
   if (!five || five.percentUsed < AUTO_COMPACT_AT || isCompacting) return
-  if (now - (await read($, compactedAt)) < COMPACT_GRACE_MS) return
-  const key = five.resetsAt ?? 'none'
-  if ((await read($, compactedFor)) === key) return
   isCompacting = true
-  await update($, compactedFor, () => key)
   try {
+    if (now - (await read($, compactedAt)) < COMPACT_GRACE_MS) return
+    const key = five.resetsAt ?? 'none'
+    if ((await read($, compactedFor)) === key) return
     $.ui.toast(tr.autoCompact(Math.floor(five.percentUsed)))
     if (isBusy && turnId) {
       await $.turn.abort({ turnId }).catch(err => note($, `auto abort failed ${String(err)}`))
       isBusy = false
     }
     await note($, `auto compact at ${five.percentUsed}%`)
-    await compact($)
+    // the window is marked only once a compact stood, so a failed one can retry — 2026-10-06
+    if (await compact($)) await update($, compactedFor, () => key)
   } finally {
     isCompacting = false
   }
@@ -335,7 +346,7 @@ async function sessions($: EngineInterface) {
 
 async function resume($: EngineInterface, surface: string) {
   const text = surface === 'terminal' ? RESUME_TERMINAL : RESUME_OTHER
-  if (cacheMinutes(await $.clock.now()) === 0) {
+  if (cacheMinutes(await $.clock.now()) === 0 && !(await alertQuiet($))) {
     const answer = await $.ui
       .ask(tr.resumeAsk, [tr.yes, tr.no])
       .catch(() => '')
@@ -352,9 +363,7 @@ async function poll($: EngineInterface) {
   if (isBusy) lastActive = tick
   const left = cacheMinutes(tick)
   if (left !== (await read($, cacheLeft))) await update($, cacheLeft, () => left)
-  const five = (await read($, limits)).find(l => l.kind === 'five_hour')
-  // quiet at 99%+ limits and until 5 turns pass after a compact — 2026-10-06
-  const quiet = (five?.percentUsed ?? 0) >= AUTO_COMPACT_AT || (await read($, sinceCompact)) < COMPACT_QUIET_MSGS
+  const quiet = await alertQuiet($)
   if (!quiet && left > 0 && left <= ALERT_MIN && (await read($, alerted)) !== lastActive) {
     await update($, alerted, () => lastActive)
     void alertCache($)
@@ -616,6 +625,8 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    // a subagent raises turn.complete (no turn.start): guard main-loop state — 2026-10-06
+    if (e.agentId) return next(e)
     isBusy = true
     turnId = e.turnId
     lastActive = await $.clock.now()
@@ -625,6 +636,7 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId) return next(e)
     isBusy = false
     lastActive = await $.clock.now()
     await update($, activeAt, () => lastActive)
@@ -772,16 +784,17 @@ export const register: Register = on => {
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     const row = e.pointer?.row
     if (row === undefined || e.origin.kind !== 'person') return next(e)
+    const zone = within(row, paneRows.model) ? 'model' : within(row, paneRows.effort) ? 'effort' : within(row, paneRows.timer) ? 'timer' : ''
+    if (!zone) return next(e)
     const dir = e.by < 0 ? 1 : -1
     // one wheel notch arrives as several events on Windows (3 lines per notch) — 2026-10-02
     const now = Date.now()
     if (now - lastWheel < WHEEL_GAP_MS) return {}
     lastWheel = now
-    if (within(row, paneRows.model)) await pick($, 'model', dir)
-    else if (within(row, paneRows.effort)) await pick($, 'effort', dir)
-    else if (within(row, paneRows.timer) && !(await read($, timer)).at) {
-      await nudgeDraft($, (e.pointer?.column ?? 0) < paneWidth / 2 ? 'h' : 'm', dir)
-    }
+    if (zone === 'model') await pick($, 'model', dir)
+    else if (zone === 'effort') await pick($, 'effort', dir)
+    else if (!(await read($, timer)).at) await nudgeDraft($, (e.pointer?.column ?? 0) < paneWidth / 2 ? 'h' : 'm', dir)
+    else return next(e)
     return {}
   })
 
