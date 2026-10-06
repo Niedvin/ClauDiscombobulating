@@ -85,3 +85,4 @@ Invoke-Claude @('plugin', 'install', $Plugin, '--scope', 'user')
 # a local-folder install has no remote to pull from — 2026-10-06
 if ($Repo) { Set-AutoUpdate $true $Repo }
 if (-not $WhatIfPreference) { Write-Host 'ClauDiscombobulating installed. Restart Claude Code and the desktop app.' }
+
