@@ -5,7 +5,8 @@
   One install serves both apps, the mod picks its mode by surface:
   console = full mod, Claude desktop = limits + cache timer under the prompt.
   Restart Claude Code / the desktop app afterwards.
-  -Repo owner/name installs from a GitHub copy of this folder instead of the local one.
+  -Repo owner/name installs from a GitHub copy of this folder instead of the local one
+  and turns on marketplace auto-update in settings.json (the old file is kept in .backups).
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param([switch]$Uninstall, [string]$Repo)
@@ -25,6 +26,35 @@ function Invoke-Claude([string[]]$CliArgs) {
   }
 }
 
+$ConfigDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
+$Settings = Join-Path $ConfigDir 'settings.json'
+
+function Set-AutoUpdate([bool]$On, [string]$Source) {
+  if (-not $PSCmdlet.ShouldProcess($Settings, "autoUpdate $(if ($On) { 'on' } else { 'off' })")) { return }
+  $cfg = if (Test-Path $Settings) { Get-Content $Settings -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+  $known = $cfg.PSObject.Properties['extraKnownMarketplaces']
+  if (-not $known -and -not $On) { return }
+  if (Test-Path $Settings) {
+    $bak = Join-Path $ConfigDir '.backups'
+    New-Item -ItemType Directory -Force $bak | Out-Null
+    $copy = Join-Path $bak "settings.json.$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    Copy-Item $Settings $copy
+    if ((Get-Item $copy).Length -eq 0) { throw "backup of $Settings is empty" }
+  }
+  if (-not $known) { $cfg | Add-Member -NotePropertyName extraKnownMarketplaces -NotePropertyValue ([pscustomobject]@{}); $known = $cfg.PSObject.Properties['extraKnownMarketplaces'] }
+  $entries = $known.Value
+  if ($On) {
+    $entry = [pscustomobject]@{ source = [pscustomobject]@{ source = 'github'; repo = $Source }; autoUpdate = $true }
+    $entries | Add-Member -NotePropertyName $Market -NotePropertyValue $entry -Force
+  } elseif ($entries.PSObject.Properties[$Market]) {
+    $entries.PSObject.Properties.Remove($Market)
+  }
+  New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+  $tmp = "$Settings.tmp"
+  [IO.File]::WriteAllText($tmp, ($cfg | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
+  Move-Item $tmp $Settings -Force
+}
+
 $markets = (& claude plugin marketplace list --json 2>$null | ConvertFrom-Json)
 $hasMarket = [bool]($markets | Where-Object { $_.name -eq $Market })
 $plugins = (& claude plugin list --json 2>$null | ConvertFrom-Json)
@@ -35,6 +65,7 @@ $hasLegacyMarket = [bool]($markets | Where-Object { $_.name -eq 'prompt-bar-loca
 if ($Uninstall) {
   if ($hasPlugin) { Invoke-Claude @('plugin', 'uninstall', $Plugin, '--scope', 'user') }
   if ($hasMarket) { Invoke-Claude @('plugin', 'marketplace', 'remove', $Market) }
+  Set-AutoUpdate $false ''
   if (-not $WhatIfPreference) { Write-Host 'prompt-bar removed.' }
   return
 }
@@ -47,4 +78,6 @@ if ($hasPlugin) { Invoke-Claude @('plugin', 'uninstall', $Plugin, '--scope', 'us
 if ($hasMarket) { Invoke-Claude @('plugin', 'marketplace', 'remove', $Market) }
 Invoke-Claude @('plugin', 'marketplace', 'add', $(if ($Repo) { $Repo } else { $Root }))
 Invoke-Claude @('plugin', 'install', $Plugin, '--scope', 'user')
+# a local-folder install has no remote to pull from — 2026-10-06
+if ($Repo) { Set-AutoUpdate $true $Repo }
 if (-not $WhatIfPreference) { Write-Host 'prompt-bar installed. Restart Claude Code and the desktop app.' }

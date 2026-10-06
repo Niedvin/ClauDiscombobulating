@@ -71,11 +71,14 @@ function resetIn(iso?: string, now = Date.now()) {
   return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`
 }
 
+// USERPROFILE is Windows-only, HOME covers macOS/Linux — 2026-10-06
+const homeDir = async ($: EngineInterface) => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'))
+
 async function note($: EngineInterface, line: string) {
   const t = new Date().toISOString().slice(11, 19)
   await update($, log, l => [...l.slice(-29), `${t} ${line}`])
   try {
-    const home = await $.env.get('USERPROFILE')
+    const home = await homeDir($)
     if (home) await $.fs.write(`${home}/.claude/mods/prompt-bar-debug.log`, (await read($, log)).join(String.fromCharCode(10)))
   } catch {}
 }
@@ -317,7 +320,7 @@ type Shared = { at: number; limits: Limit[] }
 
 // each session hears only its own API replies; the store carries the freshest to the rest — 2026-10-02
 async function sharedPath($: EngineInterface) {
-  const home = await $.env.get('USERPROFILE')
+  const home = await homeDir($)
   return home ? `${home}/.claude/mods/prompt-bar-limits.json` : undefined
 }
 

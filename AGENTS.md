@@ -59,7 +59,6 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 
 ## Auto-update from GitHub
 
-Published as marketplace `prompt-bar` (repo root has `.claude-plugin/marketplace.json`). Users: `.\install.ps1 -Repo Niedvin/prompt-bar`, then in `~/.claude/settings.json`:
-`"extraKnownMarketplaces": { "prompt-bar": { "source": { "source": "github", "repo": "Niedvin/prompt-bar" }, "autoUpdate": true } }`
+Published as marketplace `prompt-bar` (repo root has `.claude-plugin/marketplace.json`). Users: `.\install.ps1 -Repo Niedvin/prompt-bar` — also writes `extraKnownMarketplaces.prompt-bar` (github source, `autoUpdate: true`) into `settings.json` (backup in `.backups/`); `-Uninstall` removes it. Local install leaves settings alone.
 
 Release: bump `version` in `plugin.json`, commit, push. Installed copies pull it.

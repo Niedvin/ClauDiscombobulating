@@ -1,6 +1,6 @@
 {
   "name": "prompt-bar",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Console: limits, cache timer + alert, model/effort pickers, side pane. Desktop: limits and cache timer under the prompt.",
   "author": {
     "name": "Niedvin"
