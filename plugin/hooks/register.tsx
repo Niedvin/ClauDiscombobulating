@@ -72,8 +72,8 @@ function resetIn(iso?: string, now = Date.now()) {
 const FOOT_H = 24
 const chipW = (text: string) => Math.ceil(Array.from(text).length * 6.6) + 22
 
-// desktop footer: the slot is ~240 px and clips, so drawn as one scalable SVG of pills; 7d reset sits in a tooltip — 2026-10-06
-function footerSvg(cache: number, ls: Limit[], now: number) {
+// desktop footer: slot ≈ 240 px and clips, so one SVG of pills ≤ 232 px; resets live in the console footer — 2026-10-06
+function footerSvg(cache: number, ls: Limit[]) {
   const chips: { w: number; alt: string; draw: (x: number, w: number) => string }[] = []
   if (cache >= 0) {
     const text = cacheText(cache)
@@ -81,32 +81,25 @@ function footerSvg(cache: number, ls: Limit[], now: number) {
     chips.push({
       w: chipW(text),
       alt: text,
-      draw: (x, w) => `<g><rect x="${x + 0.5}" y="1.5" width="${w - 1}" height="21" rx="10.5" fill="${c}22" stroke="${c}" stroke-opacity=".7"/>
-<text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" font-weight="700" fill="${c}">${esc(text)}</text><title>Prompt cache</title></g>`,
+      draw: (x, w) => `<rect x="${x + 0.5}" y="1.5" width="${w - 1}" height="21" rx="10.5" fill="${c}22" stroke="${c}" stroke-opacity=".7"/><text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" font-weight="700" fill="${c}">${esc(text)}</text>`,
     })
   }
-  ls.slice(0, 3).forEach(l => {
+  ls.slice(0, 2).forEach(l => {
     const p = Math.min(Math.max(l.percentUsed, 0), 100)
     const c = tone(p)
     const label = shortNames[l.kind] ?? l.kind
-    const reset = l.resetsAt ? resetIn(l.resetsAt, now).replace(' ', '') : ''
-    const tail = l.kind === 'five_hour' && reset ? ` · ${reset}` : ''
-    const text = `${label} ${Math.round(p)}%${tail}`
-    const tip = `${label} ${Math.round(p)}%${reset ? `, скидання через ${resetIn(l.resetsAt, now)}` : ''}`
+    const text = `${label} ${Math.round(p)}%`
     chips.push({
       w: chipW(text),
       alt: text,
       draw: (x, w) => {
-        const id = `p${x}`
-        return `<g><clipPath id="${id}"><rect x="${x}" y="1" width="${w}" height="22" rx="11"/></clipPath>
-<rect x="${x}" y="1" width="${w}" height="22" rx="11" class="c"/>
-<rect x="${x}" y="1" width="${(w * p) / 100}" height="22" fill="${c}" fill-opacity=".28" clip-path="url(#${id})"/>
-<text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" class="t"><tspan class="d">${esc(label)} </tspan><tspan font-weight="700" fill="${c}">${Math.round(p)}%</tspan><tspan class="d">${esc(tail)}</tspan></text><title>${esc(tip)}</title></g>`
+        const fill = p > 0 ? Math.max(22, (w * p) / 100) : 0
+        return `<rect x="${x}" y="1" width="${w}" height="22" rx="11" class="c"/>${fill > 0 ? `<rect x="${x}" y="1" width="${fill}" height="22" rx="11" fill="${c}" fill-opacity=".28"/>` : ''}<text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" class="t">${esc(label)} <tspan font-weight="700" fill="${c}">${Math.round(p)}%</tspan></text>`
       },
     })
   })
   const gap = 6
-  const total = chips.reduce((n, c) => n + c.w, 0) + gap * Math.max(0, chips.length - 1)
+  const total = Math.ceil(chips.reduce((n, c) => n + c.w, 0) + gap * Math.max(0, chips.length - 1))
   let x = 0
   const body = chips
     .map(c => {
@@ -115,8 +108,8 @@ function footerSvg(cache: number, ls: Limit[], now: number) {
       return out
     })
     .join('')
-  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${FOOT_H}" viewBox="0 0 ${total} ${FOOT_H}"><style>.t{fill:#ececf1}.d{fill:#9a9aab}.c{fill:#80808026}@media (prefers-color-scheme: light){.t{fill:#1f1f24}.d{fill:#6b6b78}}text{font-family:'Segoe UI',system-ui,sans-serif}</style>${body}</svg>`
-  return { source, alt: chips.map(c => c.alt).join(', ') }
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${FOOT_H}" viewBox="0 0 ${total} ${FOOT_H}"><style>.t{fill:#ececf1}.c{fill:#80808026}@media (prefers-color-scheme: light){.t{fill:#1f1f24}}text{font-family:'Segoe UI',system-ui,sans-serif}</style>${body}</svg>`
+  return { source, alt: chips.map(c => c.alt).join(', '), width: total }
 }
 
 async function note($: EngineInterface, line: string) {
@@ -493,6 +486,15 @@ export const register: Register = on => {
     return r
   })
 
+  on('classic.SessionStart', async ($, e, next) => {
+    const secs = e.seconds_since_last_response
+    if (typeof secs === 'number') {
+      lastActive = (await $.clock.now()) - secs * 1000
+      await update($, activeAt, () => lastActive)
+    }
+    return next(e)
+  })
+
   on('session.measure', async ($, e, next) => {
     const ls = e.rateLimits.map(l => ({ ...l }))
     await update($, limits, () => ls)
@@ -709,8 +711,8 @@ export const register: Register = on => {
     const fiveLabel = five ? (isAt ? `о ${two(new Date(five).getHours())}:${two(new Date(five).getMinutes())}` : resetIn(five, now)) : ''
     if (e.surface === 'desktop') {
       const { Svg } = $.ui.resolve(e)
-      const shown = footerSvg(showsCache(cache, e.surface) ? cache : -1, ls, now)
-      return <Svg source={shown.source} alt={shown.alt} isInteractive />
+      const shown = footerSvg(showsCache(cache, e.surface) ? cache : -1, ls)
+      return <Svg source={shown.source} alt={shown.alt} width={shown.width} height={FOOT_H} />
     }
     return (
       <Box flexDirection="row" gap={2}>

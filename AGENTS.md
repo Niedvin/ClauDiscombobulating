@@ -34,8 +34,8 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 - **Sessions** = `/resume` slash command (session picker).
 - **Resume** = submit prompt as user. Terminal: `--resume`. Other surfaces: `continue`. Before send: `cacheMinutes() === 0` (idle ≥ 1h, `CACHE_TTL_MS`) → `$.ui.ask` "Cache miss… continue?"; no → nothing sent.
 - **Compact**: cache hit → effort low, `/compact`, effort back. Cache miss → model sonnet (skip if already), effort low, `/compact`, model + effort back.
-- Cache hint: console hides it first 5 min idle (`CACHE_SHOW_BELOW`), desktop shows it always (SVG pills, `footerSvg`; slot is ~240 px, one scalable SVG; 7d reset in tooltip). Then minutes left, then `⚠ Cache Miss`.
-- Cache alert: `left <= ALERT_MIN` (10), once per idle period (`alerted` state). In-app toast + Windows toast + `cache-alert.mp3` via `powershell.exe` (`ALERT_PS`, env-passed text, no double quotes in it). `lastActive` persists in `activeAt` state, survives reload.
+- Cache hint: console hides it first 5 min idle (`CACHE_SHOW_BELOW`), desktop shows it always (SVG pills, `footerSvg`, ≤232 px wide, explicit width/height, no `isInteractive`: the sandboxed frame drew nothing). Then minutes left, then `⚠ Cache Miss`.
+- Cache alert: `left <= ALERT_MIN` (10), once per idle period (`alerted` state). In-app toast + Windows toast + `cache-alert.mp3` via `powershell.exe` (`ALERT_PS`, env-passed text, no double quotes in it). `lastActive` persists in `activeAt` state (survives reload) and is restored on resume from `classic.SessionStart` `seconds_since_last_response`.
 
 ## Runtime files
 
@@ -46,6 +46,8 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 
 - Same-version update rewrites the plugin dir in place → a running session logs `plugin.json changed — names no hooks module now; register.tsx unloaded` and loses the mod until restart. Always bump `version` for a release.
 - Python reading test output on Windows: decode stdin as UTF-8, or Cyrillic turns to mojibake.
+
+- Console test without a human: pywinpty + pyte in a temp venv, `claude` (no skip-permissions flag: the auto-mode classifier denies it) from a trusted cwd such as the home dir.
 
 ## Rules
 
