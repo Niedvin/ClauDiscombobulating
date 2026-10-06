@@ -49,7 +49,7 @@ test('desktop app (start surface null, then attach): only limits and cache', { t
   const mode = await $.ui.mount({ plugin: 'prompt-bar', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   const s = JSON.stringify(await mode.drawn())
   expect(s).toContain('5г')
-  expect(s).toContain('"74"')
+  expect(s).toContain('74%')
   expect(s).toContain('7д')
   expect(s).toContain('кеш 54хв')
   expect(calls).toEqual([])

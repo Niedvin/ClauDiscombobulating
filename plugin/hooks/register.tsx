@@ -15,7 +15,7 @@ const APPLY_MS = 700
 const UNREAD = '?'
 const PANE = 'prompt-bar'
 const PANE_COLS = 24
-const STACK_ROWS = 15
+const STACK_ROWS = 21
 const CARDS_ROWS = 7 + 1 + STACK_ROWS
 const DEFAULT_TEXT = 'продовжуй'
 const RESUME_TERMINAL = '--resume'
@@ -67,6 +67,56 @@ function resetIn(iso?: string, now = Date.now()) {
   const m = Math.max(0, Math.round((Date.parse(iso) - now) / 60000))
   if (m >= 1440) return `${Math.floor(m / 1440)}д ${Math.floor((m % 1440) / 60)}г`
   return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`
+}
+
+const FOOT_H = 24
+const chipW = (text: string) => Math.ceil(Array.from(text).length * 6.6) + 22
+
+// desktop footer: the slot is ~240 px and clips, so drawn as one scalable SVG of pills; 7d reset sits in a tooltip — 2026-10-06
+function footerSvg(cache: number, ls: Limit[], now: number) {
+  const chips: { w: number; alt: string; draw: (x: number, w: number) => string }[] = []
+  if (cache >= 0) {
+    const text = cacheText(cache)
+    const c = cacheColor(cache)
+    chips.push({
+      w: chipW(text),
+      alt: text,
+      draw: (x, w) => `<g><rect x="${x + 0.5}" y="1.5" width="${w - 1}" height="21" rx="10.5" fill="${c}22" stroke="${c}" stroke-opacity=".7"/>
+<text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" font-weight="700" fill="${c}">${esc(text)}</text><title>Prompt cache</title></g>`,
+    })
+  }
+  ls.slice(0, 3).forEach(l => {
+    const p = Math.min(Math.max(l.percentUsed, 0), 100)
+    const c = tone(p)
+    const label = shortNames[l.kind] ?? l.kind
+    const reset = l.resetsAt ? resetIn(l.resetsAt, now).replace(' ', '') : ''
+    const tail = l.kind === 'five_hour' && reset ? ` · ${reset}` : ''
+    const text = `${label} ${Math.round(p)}%${tail}`
+    const tip = `${label} ${Math.round(p)}%${reset ? `, скидання через ${resetIn(l.resetsAt, now)}` : ''}`
+    chips.push({
+      w: chipW(text),
+      alt: text,
+      draw: (x, w) => {
+        const id = `p${x}`
+        return `<g><clipPath id="${id}"><rect x="${x}" y="1" width="${w}" height="22" rx="11"/></clipPath>
+<rect x="${x}" y="1" width="${w}" height="22" rx="11" class="c"/>
+<rect x="${x}" y="1" width="${(w * p) / 100}" height="22" fill="${c}" fill-opacity=".28" clip-path="url(#${id})"/>
+<text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" class="t"><tspan class="d">${esc(label)} </tspan><tspan font-weight="700" fill="${c}">${Math.round(p)}%</tspan><tspan class="d">${esc(tail)}</tspan></text><title>${esc(tip)}</title></g>`
+      },
+    })
+  })
+  const gap = 6
+  const total = chips.reduce((n, c) => n + c.w, 0) + gap * Math.max(0, chips.length - 1)
+  let x = 0
+  const body = chips
+    .map(c => {
+      const out = c.draw(x, c.w)
+      x += c.w + gap
+      return out
+    })
+    .join('')
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${FOOT_H}" viewBox="0 0 ${total} ${FOOT_H}"><style>.t{fill:#ececf1}.d{fill:#9a9aab}.c{fill:#80808026}@media (prefers-color-scheme: light){.t{fill:#1f1f24}.d{fill:#6b6b78}}text{font-family:'Segoe UI',system-ui,sans-serif}</style>${body}</svg>`
+  return { source, alt: chips.map(c => c.alt).join(', ') }
 }
 
 async function note($: EngineInterface, line: string) {
@@ -576,7 +626,7 @@ export const register: Register = on => {
     const rows = e.props.scroll.bodyRows
     const height = Math.max(rows, CARDS_ROWS)
     const stack = height - STACK_ROWS
-    paneRows = { timer: [0, 6], model: [stack + 6, stack + 9], effort: [stack + 11, stack + 14] }
+    paneRows = { timer: [0, 6], model: [stack + 12, stack + 15], effort: [stack + 17, stack + 20] }
     paneWidth = width
     const alarm = await read($, timer)
     const d = await shownDraft($)
@@ -608,15 +658,15 @@ export const register: Register = on => {
           </Box>
         </Box>
         <Box flexDirection="column" width={width}>
-        <Box flexDirection="row" justifyContent="center" backgroundColor="#3b2a52" width={width}>
+        <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor="#b678e0" backgroundColor="black" width={width}>
           <Button key="sessions" plain label="☰  Sessions" onPress={() => sessions($)} />
         </Box>
         <Box height={1} />
-        <Box flexDirection="row" justifyContent="center" backgroundColor="#1f4a3a" width={width}>
+        <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor="#3fbf8f" backgroundColor="black" width={width}>
           <Button key="resume" plain label="⟲  Resume" onPress={() => resume($, e.surface)} />
         </Box>
         <Box height={1} />
-        <Box flexDirection="row" justifyContent="center" backgroundColor="#223e66" width={width}>
+        <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor="#4f9cf0" backgroundColor="black" width={width}>
           <Button key="compact" plain label="⇊  Compact" onPress={() => compact($)} />
         </Box>
         <Box height={1} />
@@ -658,24 +708,9 @@ export const register: Register = on => {
     const five = ls.find(l => l.kind === 'five_hour')?.resetsAt
     const fiveLabel = five ? (isAt ? `о ${two(new Date(five).getHours())}:${two(new Date(five).getMinutes())}` : resetIn(five, now)) : ''
     if (e.surface === 'desktop') {
-      const chip = '#80808026'
-      return (
-        <Box flexDirection="row" alignItems="center" gap={2}>
-          {e.props.modes.length > 0 ? <Text dimColor>{e.props.modes.join(' & ')}</Text> : null}
-          {showsCache(cache, e.surface) ? (
-            <Box paddingX={1} backgroundColor={chip}>
-              <Text bold={cache <= 0} color={cacheColor(cache)}>{cacheText(cache)}</Text>
-            </Box>
-          ) : null}
-          {ls.slice(0, 3).map(l => (
-            <Box key={l.kind} flexDirection="row" alignItems="center" gap={1} paddingX={1} backgroundColor={chip}>
-              <Text dimColor>{shortNames[l.kind] ?? l.kind}</Text>
-              <Text bold color={tone(l.percentUsed)}>{Math.round(l.percentUsed)}%</Text>
-              {l.resetsAt ? <Text dimColor>↻ {resetIn(l.resetsAt, now).replace(' ', '')}</Text> : null}
-            </Box>
-          ))}
-        </Box>
-      )
+      const { Svg } = $.ui.resolve(e)
+      const shown = footerSvg(showsCache(cache, e.surface) ? cache : -1, ls, now)
+      return <Svg source={shown.source} alt={shown.alt} isInteractive />
     }
     return (
       <Box flexDirection="row" gap={2}>
