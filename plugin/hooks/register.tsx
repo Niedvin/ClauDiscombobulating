@@ -1,0 +1,702 @@
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, Hook, Register, Timer } from 'claude-code'
+
+import type { Draft, Limit, Live, Pending, Timer as Alarm } from '../types'
+
+// aliases: the engine resolves each to the newest model of the family — 2026-10-02
+const MODELS = [
+  { family: 'haiku', id: 'haiku', hue: '#3fbf8f' },
+  { family: 'sonnet', id: 'sonnet', hue: '#4f9cf0' },
+  { family: 'opus', id: 'opus', hue: '#d97757' },
+]
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const EFFORT_COLORS = ['#4f9cf0', '#3fbf8f', '#3fbf8f', '#3fbf8f', '#ef5b5b']
+const APPLY_MS = 700
+const UNREAD = '?'
+const PANE = 'prompt-bar'
+const PANE_COLS = 24
+const STACK_ROWS = 15
+const CARDS_ROWS = 7 + 1 + STACK_ROWS
+const DEFAULT_TEXT = 'продовжуй'
+const RESUME_TERMINAL = '--resume'
+const RESUME_OTHER = 'continue'
+const CONTINUE = 'Продовжити'
+const WHEEL_GAP_MS = 150
+const CACHE_TTL_MS = 3600000
+const CACHE_SHOW_BELOW = 55
+const ALERT_MIN = 10
+const ALERT_TITLE = 'prompt-bar'
+const ALERT_BODY = 'Кеш: лишилось 10 хв'
+// no double quotes: argv reaches powershell.exe as one command line — 2026-10-06
+const ALERT_PS = `$ErrorActionPreference='Stop';Add-Type -AssemblyName PresentationCore;$p=New-Object System.Windows.Media.MediaPlayer;$p.Open([uri]$env:PB_SOUND);$p.Play();[void][Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime];[void][Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime];$x=New-Object Windows.Data.Xml.Dom.XmlDocument;$x.LoadXml('<toast><visual><binding template=''ToastGeneric''><text>'+$env:PB_TITLE+'</text><text>'+$env:PB_BODY+'</text></binding></visual><audio silent=''true''/></toast>');[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x));Start-Sleep -Seconds 5`
+
+const limits = atom({ plugin: 'prompt-bar', key: 'limits' } as const, [] as Limit[])
+const live = atom({ plugin: 'prompt-bar', key: 'live' } as const, { model: '', effort: '' } as Live)
+const pending = atom({ plugin: 'prompt-bar', key: 'pending' } as const, { model: '', effort: '' } as Pending)
+const flag = atom({ plugin: 'prompt-bar', key: 'flag' } as const, UNREAD)
+const paneUp = atom({ plugin: 'prompt-bar', key: 'paneUp' } as const, false)
+const timer = atom({ plugin: 'prompt-bar', key: 'timer' } as const, { at: 0, text: DEFAULT_TEXT } as Alarm)
+const draft = atom({ plugin: 'prompt-bar', key: 'draft' } as const, { h: 0, m: 0, isSet: false } as Draft)
+const showResetAt = atom({ plugin: 'prompt-bar', key: 'showResetAt' } as const, false)
+const cacheLeft = atom({ plugin: 'prompt-bar', key: 'cacheLeft' } as const, -1)
+const activeAt = atom({ plugin: 'prompt-bar', key: 'activeAt' } as const, 0)
+const alerted = atom({ plugin: 'prompt-bar', key: 'alerted' } as const, 0)
+const log = atom({ plugin: 'prompt-bar', key: 'log' } as const, [] as string[])
+
+const modelIndex = (id: string) => MODELS.findIndex(m => id.toLowerCase().includes(m.family))
+const labels: Record<string, string> = {}
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1)
+function versionLabel(id: string) {
+  const m = /claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?/.exec(id.toLowerCase())
+  return m ? `${cap(m[1])} ${m[2]}.${m[3]}` : undefined
+}
+function modelLabel(id: string) {
+  const fam = MODELS[modelIndex(id)]?.family
+  return versionLabel(id) ?? (fam ? labels[fam] ?? cap(fam) : id || '…')
+}
+const hasEffort = (id: string) => !id.toLowerCase().includes('haiku')
+const isLevel = (v: unknown): v is string => typeof v === 'string' && EFFORTS.includes(v)
+const within = (row: number, [a, b]: number[]) => row >= a && row <= b
+const wrap = (i: number, n: number) => ((i % n) + n) % n
+const tone = (p: number) => (p >= 90 ? '#ef5b5b' : p >= 70 ? '#f0b429' : '#3fbf8f')
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+const shortNames: Record<string, string> = { five_hour: '5г', seven_day: '7д', spend_limit: '$' }
+
+function resetIn(iso?: string, now = Date.now()) {
+  if (!iso) return ''
+  const m = Math.max(0, Math.round((Date.parse(iso) - now) / 60000))
+  if (m >= 1440) return `${Math.floor(m / 1440)}д ${Math.floor((m % 1440) / 60)}г`
+  return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`
+}
+
+async function note($: EngineInterface, line: string) {
+  const t = new Date().toISOString().slice(11, 19)
+  await update($, log, l => [...l.slice(-29), `${t} ${line}`])
+  try {
+    const home = await $.env.get('USERPROFILE')
+    if (home) await $.fs.write(`${home}/.claude/mods/prompt-bar-debug.log`, (await read($, log)).join(String.fromCharCode(10)))
+  } catch {}
+}
+
+type SavedSettings = { effortLevel?: unknown; modelSettings?: Record<string, { effortLevel?: unknown }> }
+
+async function openPane($: EngineInterface, why: string) {
+  const r = await $.ui.open({ id: PANE, title: 'prompt-bar', columns: PANE_COLS })
+  await note($, `open pane (${why}) → ${JSON.stringify(r)}`)
+}
+
+async function savedEffort($: EngineInterface, model: string) {
+  const st = (await $.settings.read()) as SavedSettings
+  const own = st.modelSettings?.[model]?.effortLevel
+  if (isLevel(own)) return own
+  return isLevel(st.effortLevel) ? st.effortLevel : ''
+}
+
+
+const two = (n: number) => String(n).padStart(2, '0')
+
+const cacheText = (min: number) => (min <= 0 ? '⚠ Cache Miss' : `кеш ${min}хв`)
+const cacheColor = (min: number) => (min <= 5 ? '#ef5b5b' : min <= 15 ? '#f0b429' : '#3fbf8f')
+
+// minutes until the 1h prompt cache lapses; -1 while a turn runs or before any turn — 2026-10-06
+function cacheMinutes(now: number) {
+  if (!lastActive || isBusy) return -1
+  return Math.max(0, Math.ceil((CACHE_TTL_MS - (now - lastActive)) / 60000))
+}
+
+// the terminal footer hides the timer for the first 5 min idle, the desktop footer shows it always — 2026-10-06
+const showsCache = (min: number, surface: string) => min >= 0 && (surface === 'desktop' || min <= CACHE_SHOW_BELOW)
+
+async function alertCache($: EngineInterface) {
+  $.ui.toast(ALERT_BODY)
+  if ((await $.env.get('OS').catch(() => undefined)) !== 'Windows_NT') return
+  const sound = encodeURI(`file:///${$.plugin.root.replace(/\\/g, '/')}/assets/cache-alert.mp3`)
+  const env = { PB_SOUND: sound, PB_TITLE: ALERT_TITLE, PB_BODY: ALERT_BODY }
+  const argv = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ALERT_PS]
+  await $.process.run(argv, { env, timeoutMs: 20000 }).catch(err => note($, `alert failed ${String(err)}`))
+}
+
+function clockOf(iso: string) {
+  const d = new Date(iso)
+  const isFar = d.getTime() - Date.now() > 86400000
+  return isFar ? `${two(d.getDate())}.${two(d.getMonth() + 1)}` : `${two(d.getHours())}:${two(d.getMinutes())}`
+}
+
+function nextAt(h: number, m: number, now: number) {
+  const d = new Date(now)
+  d.setHours(h, m, 0, 0)
+  if (d.getTime() <= now) d.setDate(d.getDate() + 1)
+  return d.getTime()
+}
+
+function inFor(ms: number) {
+  const m = Math.max(0, Math.round(ms / 60000))
+  return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`
+}
+
+async function shownDraft($: EngineInterface): Promise<Draft> {
+  const d = await read($, draft)
+  if (d.isSet) return d
+  const reset = (await read($, limits)).find(l => l.kind === 'five_hour')?.resetsAt
+  const base = reset ? Date.parse(reset) + 60000 : Date.now() + 3600000
+  const t = new Date(Math.ceil(base / 300000) * 300000)
+  return { h: t.getHours(), m: t.getMinutes(), isSet: false }
+}
+
+async function nudgeDraft($: EngineInterface, part: 'h' | 'm', dir: number) {
+  const d = await shownDraft($)
+  const next = part === 'h' ? { ...d, h: wrap(d.h + dir, 24) } : { ...d, m: wrap(d.m + dir * 5, 60) }
+  await update($, draft, () => ({ ...next, isSet: true }))
+}
+
+async function armTimer($: EngineInterface) {
+  const d = await shownDraft($)
+  const at = nextAt(d.h, d.m, Date.now())
+  await update($, timer, t => ({ ...t, at }))
+  await note($, `timer armed for ${new Date(at).toString()}`)
+  $.ui.toast(`Повідомлення піде о ${two(d.h)}:${two(d.m)}`)
+}
+
+async function fireTimer($: EngineInterface) {
+  const t = await read($, timer)
+  if (!t.at || Date.now() < t.at) return
+  await update($, timer, x => ({ ...x, at: 0 }))
+  await update($, draft, x => ({ ...x, isSet: false }))
+  await note($, `timer fired: ${t.text}`)
+  await $.prompt.submit({ text: t.text || DEFAULT_TEXT, asUser: true })
+}
+
+async function compact($: EngineInterface) {
+  const model = await $.session.model()
+  const effort = (await read($, live)).effort
+  const fam = MODELS[modelIndex(model)]
+  const isMiss = cacheMinutes(await $.clock.now()) === 0
+  const isSwitch = isMiss && fam?.family !== 'sonnet'
+  try {
+    if (isSwitch) {
+      $.ui.toast('Cache miss: compact на Sonnet low')
+      await $.command.run({ command: 'model', args: 'sonnet' })
+    }
+    // a model switch makes the app re-send its own effort, so low is set after it — 2026-10-06
+    if (isSwitch || effort !== 'low') await $.command.run({ command: 'effort', args: 'low' })
+    await $.command.run({ command: 'compact' })
+  } catch (err) {
+    $.ui.toast('Compact не вдався')
+    await note($, `compact failed ${String(err)}`)
+  } finally {
+    if (isSwitch) {
+      await $.command.run({ command: 'model', args: fam?.id ?? model }).catch(() => undefined)
+      await update($, live, l => ({ ...l, model }))
+    }
+    if (isLevel(effort) && (isSwitch || effort !== 'low') && hasEffort(model)) {
+      await $.command.run({ command: 'effort', args: effort }).catch(() => undefined)
+      await update($, live, l => ({ ...l, effort }))
+    }
+  }
+}
+
+async function sessions($: EngineInterface) {
+  try {
+    await $.command.run({ command: 'resume' })
+  } catch (err) {
+    $.ui.toast('Не вдалося відкрити /resume')
+    await note($, `sessions failed ${String(err)}`)
+  }
+}
+
+async function resume($: EngineInterface, surface: string) {
+  const text = surface === 'terminal' ? RESUME_TERMINAL : RESUME_OTHER
+  if (cacheMinutes(await $.clock.now()) === 0) {
+    const answer = await $.ui
+      .ask('Cache miss: контекст кешується заново і це коштує. Все одно продовжити?', [CONTINUE, 'Скасувати'])
+      .catch(() => '')
+    if (answer !== CONTINUE) return
+  }
+  await note($, `resume → ${text}`)
+  await $.prompt.submit({ text, asUser: true })
+}
+
+async function poll($: EngineInterface) {
+  if (isFull) await fireTimer($)
+  const tick = await $.clock.now()
+  if (!lastActive) lastActive = await read($, activeAt)
+  if (isBusy) lastActive = tick
+  const left = cacheMinutes(tick)
+  if (left !== (await read($, cacheLeft))) await update($, cacheLeft, () => left)
+  if (left > 0 && left <= ALERT_MIN && (await read($, alerted)) !== lastActive) {
+    await update($, alerted, () => lastActive)
+    void alertCache($)
+  }
+  await adoptShared($).catch(() => undefined)
+  const now = Date.now()
+  const ls = await read($, limits)
+  if (ls.some(l => l.resetsAt && Date.parse(l.resetsAt) <= now)) {
+    // the API reports a new window only with the next response, so zero it locally — 2026-10-02
+    await update($, limits, xs => xs.map(l => (l.resetsAt && Date.parse(l.resetsAt) <= now ? { kind: l.kind, percentUsed: 0 } : l)))
+  }
+  if (!isFull) return
+  if (isTerminal) {
+    const up = (await $.ui.panes().catch(() => [])).some(x => x.id === PANE && x.isPlaced && x.isShown)
+    if (up !== (await read($, paneUp))) await update($, paneUp, () => up)
+  }
+  const model = await $.session.model()
+  const raw = ((await $.settings.read({ source: 'flag' })) as { effortLevel?: unknown }).effortLevel
+  const flagEffort = typeof raw === 'string' ? raw : ''
+  const seen = await read($, flag)
+  const p = await read($, pending)
+  const cur = await read($, live)
+  let nextLive = cur
+  const known = versionLabel(model)
+  const fam = MODELS[modelIndex(model)]?.family
+  if (known && fam && labels[fam] !== known) {
+    labels[fam] = known
+    await $.store.set(`label:${fam}`, known).catch(() => undefined)
+  }
+  if (!p.model && model && model !== cur.model) {
+    nextLive = { ...nextLive, model }
+    // app re-sends its own effort on every model switch — 2026-10-02
+    if (cur.model) nextLive = { ...nextLive, effort: flagEffort || (await savedEffort($, model)) || cur.effort }
+  }
+  if (flagEffort !== seen) {
+    await update($, flag, () => flagEffort)
+    if (seen !== UNREAD || !cur.effort) {
+      nextLive = { ...nextLive, effort: flagEffort }
+      if (p.effort) await update($, pending, q => ({ ...q, effort: '' }))
+      await note($, `app effort → ${flagEffort || 'unset'}`)
+    }
+  }
+  if (!nextLive.effort) {
+    const saved = await savedEffort($, model)
+    if (saved) nextLive = { ...nextLive, effort: saved }
+  }
+  if (nextLive !== cur) await update($, live, () => nextLive)
+}
+
+let isTerminal = false
+let isFull = false
+let sharedAt = 0
+let lastActive = 0
+let isBusy = false
+
+type Shared = { at: number; limits: Limit[] }
+
+// each session hears only its own API replies; the store carries the freshest to the rest — 2026-10-02
+async function sharedPath($: EngineInterface) {
+  const home = await $.env.get('USERPROFILE')
+  return home ? `${home}/.claude/mods/prompt-bar-limits.json` : undefined
+}
+
+async function shareLimits($: EngineInterface, ls: Limit[]) {
+  sharedAt = Date.now()
+  const path = await sharedPath($)
+  if (path) await $.fs.write(path, JSON.stringify({ at: sharedAt, limits: ls })).catch(() => undefined)
+}
+
+async function adoptShared($: EngineInterface) {
+  const path = await sharedPath($)
+  if (!path) return
+  let v: Shared | undefined
+  try {
+    v = JSON.parse(await $.fs.read(path)) as Shared
+  } catch {
+    return
+  }
+  if (!v || !Array.isArray(v.limits) || v.at <= sharedAt) return
+  sharedAt = v.at
+  await update($, limits, () => v.limits)
+}
+let effortTimer: Timer | undefined
+let modelTimer: Timer | undefined
+
+async function applyModel($: EngineInterface) {
+  const p = await read($, pending)
+  if (!p.model) return
+  const cur = await read($, live)
+  if (p.model !== cur.model) {
+    try {
+      const r = await $.command.run({ command: 'model', args: p.model })
+      const text = r.text ?? ''
+      if (!/Set model to|Kept model as/.test(text)) $.ui.toast(text.slice(0, 160) || `prompt-bar: /model ${p.model} failed`)
+      await note($, `/model ${p.model} → ${text.slice(0, 90)}`)
+    } catch (err) {
+      $.ui.toast(`prompt-bar: /model ${p.model} failed`)
+      await note($, `/model failed ${String(err)}`)
+    }
+    const model = await $.session.model()
+    const flagged = ((await $.settings.read({ source: 'flag' })) as SavedSettings).effortLevel
+    const effort = isLevel(flagged) ? flagged : await savedEffort($, model)
+    await update($, live, l => ({ ...l, model, effort: effort || l.effort }))
+  }
+  await update($, pending, q => (q.model === p.model ? { ...q, model: '' } : q))
+}
+
+async function applyEffort($: EngineInterface) {
+  const p = await read($, pending)
+  if (!p.effort) return
+  const cur = await read($, live)
+  if (p.effort !== cur.effort) {
+    try {
+      const r = await $.command.run({ command: 'effort', args: p.effort })
+      const text = r.text ?? ''
+      const isRefused = /Not applied|Failed|Unknown|Usage:/.test(text)
+      const level = parseEffort(text) ?? (isRefused ? undefined : p.effort)
+      if (level) await update($, live, l => ({ ...l, effort: level }))
+      else $.ui.toast(text.slice(0, 160))
+      await note($, `/effort ${p.effort} → ${text.slice(0, 90)}`)
+    } catch (err) {
+      $.ui.toast(`prompt-bar: /effort ${p.effort} failed`)
+      await note($, `/effort failed ${String(err)}`)
+    }
+  }
+  await update($, pending, q => (q.effort === p.effort ? { ...q, effort: '' } : q))
+}
+
+async function pick($: EngineInterface, zone: 'model' | 'effort', dir: number) {
+  const cur = await read($, live)
+  const p = await read($, pending)
+  const model = p.model || cur.model
+  if (zone === 'model') {
+    const i = modelIndex(model)
+    const target = MODELS[wrap(i < 0 ? (dir > 0 ? 0 : -1) : i + dir, MODELS.length)].id
+    await update($, pending, q => ({ ...q, model: target }))
+    modelTimer?.cancel()
+    modelTimer = $.clock.after(APPLY_MS, () => void applyModel($))
+    return
+  }
+  if (!hasEffort(model)) {
+    $.ui.toast('Haiku не має effort')
+    return
+  }
+  const i = EFFORTS.indexOf(p.effort || cur.effort)
+  const target = EFFORTS[wrap(i < 0 ? 2 : i + dir, EFFORTS.length)]
+  await update($, pending, q => ({ ...q, effort: target }))
+  effortTimer?.cancel()
+  effortTimer = $.clock.after(APPLY_MS, () => void applyEffort($))
+}
+
+function parseEffort(text: string) {
+  const m = /set to '(\w+)' instead/.exec(text) ?? /(?:Set effort level to|Current effort level:|currently) (\w+)/.exec(text)
+  const level = m?.[1]
+  return isLevel(level) ? level : undefined
+}
+
+const onCommand: Hook<'command.run'> = async ($, e, next) => {
+  if (!isFull) return next(e)
+  const r = await next(e)
+  const text = r.text ?? ''
+  if (e.command === 'effort') {
+    const level = parseEffort(text) ?? (isLevel(e.args) && !/Not applied|Failed/.test(text) ? e.args : undefined)
+    if (level) await update($, live, l => ({ ...l, effort: level }))
+  } else {
+    const model = await $.session.model()
+    await update($, live, l => ({ ...l, model }))
+  }
+  await note($, `typed /${e.command} ${e.args} → ${text.slice(0, 90)}`)
+  return r
+}
+
+// the desktop app drives the CLI headless: session.start says surface null, the app shows up later as an attach — 2026-10-06
+async function enableFull($: EngineInterface, why: string) {
+  if (isFull) return
+  isFull = true
+  isTerminal = true
+  await $.command.register({ name: 'prompt-bar', description: 'Open the model and effort pane' })
+  await openPane($, why)
+  for (const m of MODELS) {
+    const v = await $.store.get(`label:${m.family}`).catch(() => undefined)
+    if (typeof v === 'string') labels[m.family] = v
+  }
+  await poll($)
+  await $.tool.register({
+    name: 'probe',
+    description: 'prompt-bar diagnostics: model and effort as the engine and the app hold them, render metrics, recent events.',
+    inputSchema: { type: 'object', properties: {} },
+  })
+}
+
+export const register: Register = on => {
+  let metrics: Record<string, unknown> = {}
+  let paneRows = { timer: [-1, -1], model: [-1, -1], effort: [-1, -1] }
+  let paneWidth = 24
+  let lastWheel = 0
+
+  on('session.start', async ($, e, next) => {
+    const r = await next(e)
+    $.clock.every(1000, () => void poll($))
+    try {
+      const u = await $.session.usage()
+      await update($, limits, () => u.rateLimits.map(l => ({ ...l })))
+      await poll($)
+      const seen = e.surface ? [e.surface] : await $.session.surfaces().catch(() => [])
+      const other = seen.find(x => x !== 'desktop')
+      if (other) await enableFull($, `start surface=${other}`)
+    } catch (err) {
+      await note($, `start failed ${String(err)}`)
+    }
+    return r
+  })
+
+  on('session.attach', async ($, e, next) => {
+    const r = await next(e)
+    if (e.surface === 'desktop') isFull = false
+    else await enableFull($, `attach surface=${e.surface}`).catch(err => note($, `attach failed ${String(err)}`))
+    return r
+  })
+
+  on('session.measure', async ($, e, next) => {
+    const ls = e.rateLimits.map(l => ({ ...l }))
+    await update($, limits, () => ls)
+    if (ls.length > 0) await shareLimits($, ls).catch(() => undefined)
+    return next(e)
+  })
+
+  on('turn.start', async ($, e, next) => {
+    isBusy = true
+    lastActive = await $.clock.now()
+    await update($, activeAt, () => lastActive)
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    isBusy = false
+    lastActive = await $.clock.now()
+    await update($, activeAt, () => lastActive)
+    return next(e)
+  })
+
+  on('turn.step', async function* ($, e, next) {
+    if (isFull && !e.agentId && isLevel(e.effort)) {
+      const p = await read($, pending)
+      const cur = await read($, live)
+      const effort = e.effort
+      if (!p.effort && cur.effort !== effort) await update($, live, l => ({ ...l, effort }))
+    }
+    return yield* next(e)
+  })
+
+  on('command.run', { command: 'effort' }, onCommand)
+  on('command.run', { command: 'model' }, onCommand)
+
+  on('tool.call', { tool: 'mcp__prompt-bar__probe' }, async $ => {
+    const merged = (await $.settings.read()) as { effortLevel?: unknown; model?: unknown }
+    const fromApp = (await $.settings.read({ source: 'flag' })) as { effortLevel?: unknown; model?: unknown }
+    const commands = (await $.command.list()).map(c => c.name).filter(n => /^(model|effort)$/.test(n))
+    const data = {
+      version: 3,
+      model: await $.session.model(),
+      settings: { merged: { effortLevel: merged.effortLevel, model: merged.model }, flag: { effortLevel: fromApp.effortLevel } },
+      live: await read($, live),
+      pending: await read($, pending),
+      flag: await read($, flag),
+      surfaces: await $.session.surfaces(),
+      commands,
+      metrics,
+      paneRows,
+      log: await read($, log),
+    }
+    return { result: JSON.stringify(data, null, 1) }
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!isFull || e.surface === 'desktop' || e.props.hasSurvey || e.props.view.agentId) return next(e)
+    metrics = { surface: e.surface, bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, viewport: e.viewport ?? null }
+    const cur = await read($, live)
+    const p = await read($, pending)
+    const model = p.model || cur.model
+    const effort = p.effort || cur.effort
+
+    if (await read($, paneUp)) return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const i = modelIndex(model)
+    const hue = MODELS[i]?.hue ?? 'gray'
+    const isOn = hasEffort(model)
+    const f = EFFORTS.indexOf(effort)
+    const effortColor = isOn && f >= 0 ? EFFORT_COLORS[f] : 'gray'
+    return (
+      <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap={1} width={e.props.bodyColumns}>
+        <Button key="to-pane" plain dimColor label="колесо ⇥" onPress={() => openPane($, 'button')} />
+        <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={hue} paddingX={1}>
+          <Button key="m-prev" plain dimColor label="◀" onPress={() => pick($, 'model', -1)} />
+          <Text bold color={hue}>
+            {modelLabel(model)}
+            {p.model ? ' •' : ''}
+          </Text>
+          <Button key="m-next" plain dimColor label="▶" onPress={() => pick($, 'model', 1)} />
+        </Box>
+        <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={effortColor} paddingX={1}>
+          <Button key="e-prev" plain dimColor label="◀" onPress={() => pick($, 'effort', -1)} />
+          <Text bold color={effortColor}>
+            {isOn ? effort || 'auto' : 'n/a'}
+            {p.effort ? ' •' : ''}
+          </Text>
+          <Text>
+            {EFFORTS.map((lv, k) => (
+              <Text key={lv} color={isOn && f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k]}</Text>
+            ))}
+          </Text>
+          <Button key="e-next" plain dimColor label="▶" onPress={() => pick($, 'effort', 1)} />
+        </Box>
+      </Box>
+    )
+  })
+
+  on('command.run', { command: 'prompt-bar' }, async $ => {
+    const opened = await $.ui.open({ id: PANE, title: 'prompt-bar', columns: PANE_COLS })
+    return { text: opened.isPlaced ? 'Панель відкрита.' : 'Панель чекає на ширший термінал.' }
+  })
+
+  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    const row = e.pointer?.row
+    if (row === undefined || e.origin.kind !== 'person') return next(e)
+    const dir = e.by < 0 ? 1 : -1
+    // one wheel notch arrives as several events on Windows (3 lines per notch) — 2026-10-02
+    const now = Date.now()
+    if (now - lastWheel < WHEEL_GAP_MS) return {}
+    lastWheel = now
+    if (within(row, paneRows.model)) await pick($, 'model', dir)
+    else if (within(row, paneRows.effort)) await pick($, 'effort', dir)
+    else if (within(row, paneRows.timer) && !(await read($, timer)).at) {
+      await nudgeDraft($, (e.pointer?.column ?? 0) < paneWidth / 2 ? 'h' : 'm', dir)
+    }
+    return {}
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Button, Input, Text } = $.ui.resolve(e)
+    const cur = await read($, live)
+    const p = await read($, pending)
+    const model = p.model || cur.model
+    const effort = p.effort || cur.effort
+    const i = modelIndex(model)
+    const hue = MODELS[i]?.hue ?? 'gray'
+    const isOn = hasEffort(model)
+    const f = EFFORTS.indexOf(effort)
+    const effortColor = isOn && f >= 0 ? EFFORT_COLORS[f] : 'gray'
+    const width = Math.max(18, e.props.bodyColumns)
+    const rows = e.props.scroll.bodyRows
+    const height = Math.max(rows, CARDS_ROWS)
+    const stack = height - STACK_ROWS
+    paneRows = { timer: [0, 6], model: [stack + 6, stack + 9], effort: [stack + 11, stack + 14] }
+    paneWidth = width
+    const alarm = await read($, timer)
+    const d = await shownDraft($)
+    const isArmed = alarm.at > 0
+    const at = isArmed ? new Date(alarm.at) : undefined
+    const hh = at ? at.getHours() : d.h
+    const mm = at ? at.getMinutes() : d.m
+    return (
+      <Box flexDirection="column" width={width} height={height} backgroundColor="black" justifyContent="space-between">
+        <Box flexDirection="column" alignItems="center" borderStyle="round" borderColor={isArmed ? '#f0b429' : '#6c6c7c'} backgroundColor="black" width={width}>
+          <Text bold color={isArmed ? '#f0b429' : '#ececf1'}>
+            ⏰ {two(hh)} : {two(mm)}
+          </Text>
+          <Text color="#3a3a48">{'─'.repeat(Math.max(4, width - 4))}</Text>
+          {isArmed ? (
+            <Text color="#9a9aab" wrap="truncate-end">
+              «{alarm.text}» · через {inFor(alarm.at - Date.now())}
+            </Text>
+          ) : (
+            <Input key="timer-text" placeholder="текст повідомлення" submitLabel="" value={alarm.text} onInput={v => update($, timer, t => ({ ...t, text: v }))} onSubmit={async v => { await update($, timer, t => ({ ...t, text: v || t.text })); await armTimer($) }} />
+          )}
+          <Text color="#3a3a48">{'─'.repeat(Math.max(4, width - 4))}</Text>
+          <Box flexDirection="row" justifyContent="center">
+            {isArmed ? (
+              <Button key="timer-cancel" plain label="✕  скасувати" onPress={() => update($, timer, t => ({ ...t, at: 0 }))} />
+            ) : (
+              <Button key="timer-arm" plain label="✓  відправити" onPress={() => armTimer($)} />
+            )}
+          </Box>
+        </Box>
+        <Box flexDirection="column" width={width}>
+        <Box flexDirection="row" justifyContent="center" backgroundColor="#3b2a52" width={width}>
+          <Button key="sessions" plain label="☰  Sessions" onPress={() => sessions($)} />
+        </Box>
+        <Box height={1} />
+        <Box flexDirection="row" justifyContent="center" backgroundColor="#1f4a3a" width={width}>
+          <Button key="resume" plain label="⟲  Resume" onPress={() => resume($, e.surface)} />
+        </Box>
+        <Box height={1} />
+        <Box flexDirection="row" justifyContent="center" backgroundColor="#223e66" width={width}>
+          <Button key="compact" plain label="⇊  Compact" onPress={() => compact($)} />
+        </Box>
+        <Box height={1} />
+        <Box flexDirection="column" alignItems="center" justifyContent="center" borderStyle="round" borderColor={hue} backgroundColor="black" width={width}>
+          <Text bold color={hue}>
+            {modelLabel(model)}
+            {p.model ? ' •' : ''}
+          </Text>
+          <Text>
+            {MODELS.map((m, k) => (
+              <Text key={m.family} color={k === i ? hue : 'gray'}>{k === i ? ' ● ' : ' · '}</Text>
+            ))}
+          </Text>
+        </Box>
+        <Box height={1} />
+        <Box flexDirection="column" alignItems="center" justifyContent="center" borderStyle="round" borderColor={effortColor} backgroundColor="black" width={width}>
+          <Text bold color={effortColor}>
+            {isOn ? effort || 'auto' : 'n/a'}
+            {p.effort ? ' •' : ''}
+          </Text>
+          <Text>
+            {EFFORTS.map((lv, k) => (
+              <Text key={lv} color={isOn && f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k].repeat(2)} </Text>
+            ))}
+          </Text>
+        </Box>
+        </Box>
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const ls = await read($, limits)
+    const cache = await read($, cacheLeft)
+    if (ls.length === 0 && cache < 0) return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const now = Date.now()
+    const isAt = await read($, showResetAt)
+    const five = ls.find(l => l.kind === 'five_hour')?.resetsAt
+    const fiveLabel = five ? (isAt ? `о ${two(new Date(five).getHours())}:${two(new Date(five).getMinutes())}` : resetIn(five, now)) : ''
+    if (e.surface === 'desktop') {
+      const chip = '#80808026'
+      return (
+        <Box flexDirection="row" alignItems="center" gap={2}>
+          {e.props.modes.length > 0 ? <Text dimColor>{e.props.modes.join(' & ')}</Text> : null}
+          {showsCache(cache, e.surface) ? (
+            <Box paddingX={1} backgroundColor={chip}>
+              <Text bold={cache <= 0} color={cacheColor(cache)}>{cacheText(cache)}</Text>
+            </Box>
+          ) : null}
+          {ls.slice(0, 3).map(l => (
+            <Box key={l.kind} flexDirection="row" alignItems="center" gap={1} paddingX={1} backgroundColor={chip}>
+              <Text dimColor>{shortNames[l.kind] ?? l.kind}</Text>
+              <Text bold color={tone(l.percentUsed)}>{Math.round(l.percentUsed)}%</Text>
+              {l.resetsAt ? <Text dimColor>↻ {resetIn(l.resetsAt, now).replace(' ', '')}</Text> : null}
+            </Box>
+          ))}
+        </Box>
+      )
+    }
+    return (
+      <Box flexDirection="row" gap={2}>
+        {e.props.modes.length > 0 ? <Text dimColor>{e.props.modes.join(' & ')}</Text> : null}
+        {showsCache(cache, e.surface) ? <Text bold={cache <= 0} color={cacheColor(cache)}>{cacheText(cache)}</Text> : null}
+        {ls.slice(0, 3).map(l => {
+          const n = Math.round(Math.min(l.percentUsed, 100) / 10)
+          return (
+            <Box key={l.kind} flexDirection="row">
+            <Text>
+              <Text dimColor>{shortNames[l.kind] ?? l.kind} </Text>
+              <Text color={tone(l.percentUsed)}>{'━'.repeat(n)}</Text>
+              <Text color="gray">{'─'.repeat(10 - n)}</Text>
+              <Text bold color={tone(l.percentUsed)}> {Math.round(l.percentUsed)}%</Text>
+              {l.resetsAt && l.kind !== 'five_hour' ? <Text dimColor> ({resetIn(l.resetsAt, now)})</Text> : null}
+            </Text>
+            {l.kind === 'five_hour' && fiveLabel ? <Button key="reset-toggle" plain dimColor label={` (${fiveLabel})`} onPress={() => update($, showResetAt, v => !v)} /> : null}
+            </Box>
+          )
+        })}
+      </Box>
+    )
+  })
+}

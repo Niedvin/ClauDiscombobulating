@@ -1,0 +1,14 @@
+{
+  "name": "prompt-bar",
+  "description": "prompt-bar mod for Claude Code",
+  "owner": {
+    "name": "Niedvin"
+  },
+  "plugins": [
+    {
+      "name": "prompt-bar",
+      "source": "./plugin",
+      "description": "Console: limits, cache timer + alert, model/effort pickers, side pane. Desktop: limits and cache timer under the prompt."
+    }
+  ]
+}
