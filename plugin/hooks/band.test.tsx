@@ -9,7 +9,7 @@ test('desktop app (start surface null, then attach): only limits and cache', { t
     startedAt: 0,
     context: { window: 200000 },
     rateLimits: [
-      { kind: 'five_hour', percentUsed: 8, resetsAt: '2026-10-02T12:00:00Z' },
+      { kind: 'five_hour', percentUsed: 8, resetsAt: new Date(Date.now() + 3 * 3600000).toISOString() },
       { kind: 'seven_day', percentUsed: 74 },
     ],
   } }))
@@ -33,9 +33,9 @@ test('desktop app (start surface null, then attach): only limits and cache', { t
     calls.push('open')
     return { value: { isPlaced: true } }
   })
-  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+  on('ui.render', { component: 'SessionMode' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
-    return <Text>ENGINE</Text>
+    return <Text>FOOTER</Text>
   })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
@@ -44,13 +44,33 @@ test('desktop app (start surface null, then attach): only limits and cache', { t
   await clock.advance(6 * 60000)
 
   const band = await $.ui.mount({ plugin: 'prompt-bar', surface: 'desktop', component: 'AbovePrompt', props: BAND })
-  expect(JSON.stringify(await band.drawn())).toContain('ENGINE')
+  const s = JSON.stringify(await band.drawn())
+  expect(s).toContain('кеш 54хв')
+  expect(s).toContain('5г')
+  expect(s).toContain('7д')
+  expect(s).toContain('"74"')
+  expect(s).toContain('↻')
+  expect(s).not.toContain('Opus')
 
   const mode = await $.ui.mount({ plugin: 'prompt-bar', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
-  const s = JSON.stringify(await mode.drawn())
-  expect(s).toContain('5г')
-  expect(s).toContain('74%')
-  expect(s).toContain('7д')
-  expect(s).toContain('кеш 54хв')
+  expect(JSON.stringify(await mode.drawn())).toContain('FOOTER')
   expect(calls).toEqual([])
+})
+
+test('desktop compact button: effort low, compact, effort back', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const ran: string[] = []
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: 8 }] } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('settings.read', () => ({ value: { effortLevel: 'xhigh' } }))
+  on('command.run', (_$, e) => {
+    ran.push(`${e.command} ${e.args}`.trim())
+    return { text: e.command === 'effort' ? `Set effort level to ${e.args} (this session only): x` : '' }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.advance(1100)
+  const band = await $.ui.mount({ plugin: 'prompt-bar', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  await band.press({ key: 'compact' })
+  expect(ran).toEqual(['effort low', 'compact', 'effort xhigh'])
 })

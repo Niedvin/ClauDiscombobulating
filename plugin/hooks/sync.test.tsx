@@ -44,7 +44,11 @@ test(`cache timer on ${surface}: 55 down to 0, terminal hides first 5 min`, { ti
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface, isInteractive: true })
-  const mode = await $.ui.mount({ plugin: 'prompt-bar', surface, component: 'SessionMode', props: { modes: [] } })
+  const mode = await $.ui.mount(
+    surface === 'desktop'
+      ? { plugin: 'prompt-bar', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 20 }, view: {} } }
+      : { plugin: 'prompt-bar', surface, component: 'SessionMode', props: { modes: [] } },
+  )
   const text = async () => JSON.stringify(await mode.drawn())
   expect(await text()).not.toContain('кеш')
 

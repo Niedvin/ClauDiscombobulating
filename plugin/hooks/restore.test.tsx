@@ -17,7 +17,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/', surface, isInteractive: true })
     await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 40 * 60 })
     await clock.advance(1500)
-    const mode = await $.ui.mount({ plugin: 'prompt-bar', surface, component: 'SessionMode', props: { modes: [] } })
+    const mode = await $.ui.mount(
+      surface === 'desktop'
+        ? { plugin: 'prompt-bar', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 20 }, view: {} } }
+        : { plugin: 'prompt-bar', surface, component: 'SessionMode', props: { modes: [] } },
+    )
     expect(JSON.stringify(await mode.drawn())).toContain('кеш 20хв')
   })
 }

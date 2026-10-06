@@ -3,7 +3,7 @@
 Claude Code mod. One plugin, mode by surface:
 
 - **Console (terminal)**: full. Limits + cache timer in footer, model/effort pickers above prompt, side pane (timer, Sessions, Resume, Compact, model, effort).
-- **Claude desktop**: lean. Limits + cache timer only, in footer under prompt (`SessionMode`). No pickers, no pane, no commands, no timer.
+- **Claude desktop**: lean. Limits + cache timer only, in a band above the prompt (`AbovePrompt`). No pickers, no pane, no commands, no timer. Footer (`SessionMode`) passes through: its slot is ≈220 px and clips.
 
 Switch: `isFull` (set by `enableFull`). Desktop app runs the CLI headless: `session.start` surface is `null`, app arrives later as `session.attach` `desktop`. So: start with terminal/other surface → full; attach `desktop` → lean. Never branch on `e.surface === 'desktop'` at start. Render hooks gate on their own `e.surface`.
 
@@ -34,8 +34,10 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 - **Sessions** = `/resume` slash command (session picker).
 - **Resume** = submit prompt as user. Terminal: `--resume`. Other surfaces: `continue`. Before send: `cacheMinutes() === 0` (idle ≥ 1h, `CACHE_TTL_MS`) → `$.ui.ask` "Cache miss… continue?"; no → nothing sent.
 - **Compact**: cache hit → effort low, `/compact`, effort back. Cache miss → model sonnet (skip if already), effort low, `/compact`, model + effort back.
-- Cache hint: console hides it first 5 min idle (`CACHE_SHOW_BELOW`), desktop shows it always (SVG pills, `footerSvg`, ≤232 px wide, explicit width/height, no `isInteractive`: the sandboxed frame drew nothing). Then minutes left, then `⚠ Cache Miss`.
+- Cache hint: console hides it first 5 min idle (`CACHE_SHOW_BELOW`) in the `SessionMode` footer; desktop shows it always in the `AbovePrompt` band (flat dark pills, Box + Text, Compact button, cache pill on the right; `Svg` drew nothing in the footer slot). Then minutes left, then `⚠ Cache Miss`.
 - Cache alert: `left <= ALERT_MIN` (10), once per idle period (`alerted` state). In-app toast + Windows toast + `cache-alert.mp3` via `powershell.exe` (`ALERT_PS`, env-passed text, no double quotes in it). `lastActive` persists in `activeAt` state (survives reload) and is restored on resume from `classic.SessionStart` `seconds_since_last_response`.
+
+- Auto compact: `five_hour` ≥ 99% (`AUTO_COMPACT_AT`) → abort running turn (`$.turn.abort`), run `compact()`. Once per 5h window (`compactedFor` state = `resetsAt`). Check cadence by last seen %: <75 → 5 min, <90 → 1 min, <95 → 30 s, else 1 s. Checked in `poll`, both surfaces. No auto-resume after.
 
 ## Runtime files
 

@@ -25,6 +25,7 @@ const WHEEL_GAP_MS = 150
 const CACHE_TTL_MS = 3600000
 const CACHE_SHOW_BELOW = 55
 const ALERT_MIN = 10
+const AUTO_COMPACT_AT = 99
 const ALERT_TITLE = 'prompt-bar'
 const ALERT_BODY = 'Кеш: лишилось 10 хв'
 // no double quotes: argv reaches powershell.exe as one command line — 2026-10-06
@@ -41,6 +42,8 @@ const showResetAt = atom({ plugin: 'prompt-bar', key: 'showResetAt' } as const, 
 const cacheLeft = atom({ plugin: 'prompt-bar', key: 'cacheLeft' } as const, -1)
 const activeAt = atom({ plugin: 'prompt-bar', key: 'activeAt' } as const, 0)
 const alerted = atom({ plugin: 'prompt-bar', key: 'alerted' } as const, 0)
+// persisted per 5h window so a reload at 99% does not compact twice — 2026-10-06
+const compactedFor = atom({ plugin: 'prompt-bar', key: 'compactedFor' } as const, '')
 const log = atom({ plugin: 'prompt-bar', key: 'log' } as const, [] as string[])
 
 const modelIndex = (id: string) => MODELS.findIndex(m => id.toLowerCase().includes(m.family))
@@ -59,7 +62,6 @@ const isLevel = (v: unknown): v is string => typeof v === 'string' && EFFORTS.in
 const within = (row: number, [a, b]: number[]) => row >= a && row <= b
 const wrap = (i: number, n: number) => ((i % n) + n) % n
 const tone = (p: number) => (p >= 90 ? '#ef5b5b' : p >= 70 ? '#f0b429' : '#3fbf8f')
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 const shortNames: Record<string, string> = { five_hour: '5г', seven_day: '7д', spend_limit: '$' }
 
 function resetIn(iso?: string, now = Date.now()) {
@@ -67,49 +69,6 @@ function resetIn(iso?: string, now = Date.now()) {
   const m = Math.max(0, Math.round((Date.parse(iso) - now) / 60000))
   if (m >= 1440) return `${Math.floor(m / 1440)}д ${Math.floor((m % 1440) / 60)}г`
   return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`
-}
-
-const FOOT_H = 24
-const chipW = (text: string) => Math.ceil(Array.from(text).length * 6.6) + 22
-
-// desktop footer: slot ≈ 240 px and clips, so one SVG of pills ≤ 232 px; resets live in the console footer — 2026-10-06
-function footerSvg(cache: number, ls: Limit[]) {
-  const chips: { w: number; alt: string; draw: (x: number, w: number) => string }[] = []
-  if (cache >= 0) {
-    const text = cacheText(cache)
-    const c = cacheColor(cache)
-    chips.push({
-      w: chipW(text),
-      alt: text,
-      draw: (x, w) => `<rect x="${x + 0.5}" y="1.5" width="${w - 1}" height="21" rx="10.5" fill="${c}22" stroke="${c}" stroke-opacity=".7"/><text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" font-weight="700" fill="${c}">${esc(text)}</text>`,
-    })
-  }
-  ls.slice(0, 2).forEach(l => {
-    const p = Math.min(Math.max(l.percentUsed, 0), 100)
-    const c = tone(p)
-    const label = shortNames[l.kind] ?? l.kind
-    const text = `${label} ${Math.round(p)}%`
-    chips.push({
-      w: chipW(text),
-      alt: text,
-      draw: (x, w) => {
-        const fill = p > 0 ? Math.max(22, (w * p) / 100) : 0
-        return `<rect x="${x}" y="1" width="${w}" height="22" rx="11" class="c"/>${fill > 0 ? `<rect x="${x}" y="1" width="${fill}" height="22" rx="11" fill="${c}" fill-opacity=".28"/>` : ''}<text x="${x + w / 2}" y="16" text-anchor="middle" font-size="12" class="t">${esc(label)} <tspan font-weight="700" fill="${c}">${Math.round(p)}%</tspan></text>`
-      },
-    })
-  })
-  const gap = 6
-  const total = Math.ceil(chips.reduce((n, c) => n + c.w, 0) + gap * Math.max(0, chips.length - 1))
-  let x = 0
-  const body = chips
-    .map(c => {
-      const out = c.draw(x, c.w)
-      x += c.w + gap
-      return out
-    })
-    .join('')
-  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${FOOT_H}" viewBox="0 0 ${total} ${FOOT_H}"><style>.t{fill:#ececf1}.c{fill:#80808026}@media (prefers-color-scheme: light){.t{fill:#1f1f24}}text{font-family:'Segoe UI',system-ui,sans-serif}</style>${body}</svg>`
-  return { source, alt: chips.map(c => c.alt).join(', '), width: total }
 }
 
 async function note($: EngineInterface, line: string) {
@@ -211,7 +170,9 @@ async function fireTimer($: EngineInterface) {
 
 async function compact($: EngineInterface) {
   const model = await $.session.model()
-  const effort = (await read($, live)).effort
+  // live is only polled in full mode, so desktop reads the effort from the app flag or saved settings — 2026-10-06
+  const flagged = ((await $.settings.read({ source: 'flag' })) as SavedSettings).effortLevel
+  const effort = (await read($, live)).effort || (isLevel(flagged) ? flagged : await savedEffort($, model))
   const fam = MODELS[modelIndex(model)]
   const isMiss = cacheMinutes(await $.clock.now()) === 0
   const isSwitch = isMiss && fam?.family !== 'sonnet'
@@ -235,6 +196,32 @@ async function compact($: EngineInterface) {
       await $.command.run({ command: 'effort', args: effort }).catch(() => undefined)
       await update($, live, l => ({ ...l, effort }))
     }
+  }
+}
+
+const checkEveryMs = (p: number) => (p >= 95 ? 1000 : p >= 90 ? 30000 : p >= 75 ? 60000 : 300000)
+
+async function autoCompact($: EngineInterface) {
+  const five = (await read($, limits)).find(l => l.kind === 'five_hour')
+  const now = await $.clock.now()
+  if (five && now - lastCheck < checkEveryMs(lastPercent)) return
+  lastCheck = now
+  lastPercent = five?.percentUsed ?? 0
+  if (!five || five.percentUsed < AUTO_COMPACT_AT || isCompacting) return
+  const key = five.resetsAt ?? 'none'
+  if ((await read($, compactedFor)) === key) return
+  isCompacting = true
+  await update($, compactedFor, () => key)
+  try {
+    $.ui.toast(`Ліміт 5г ${Math.floor(five.percentUsed)}%: стоп і compact`)
+    if (isBusy && turnId) {
+      await $.turn.abort({ turnId }).catch(err => note($, `auto abort failed ${String(err)}`))
+      isBusy = false
+    }
+    await note($, `auto compact at ${five.percentUsed}%`)
+    await compact($)
+  } finally {
+    isCompacting = false
   }
 }
 
@@ -277,6 +264,7 @@ async function poll($: EngineInterface) {
     // the API reports a new window only with the next response, so zero it locally — 2026-10-02
     await update($, limits, xs => xs.map(l => (l.resetsAt && Date.parse(l.resetsAt) <= now ? { kind: l.kind, percentUsed: 0 } : l)))
   }
+  void autoCompact($).catch(err => note($, `auto compact failed ${String(err)}`))
   if (!isFull) return
   if (isTerminal) {
     const up = (await $.ui.panes().catch(() => [])).some(x => x.id === PANE && x.isPlaced && x.isShown)
@@ -320,6 +308,10 @@ let isFull = false
 let sharedAt = 0
 let lastActive = 0
 let isBusy = false
+let isCompacting = false
+let lastCheck = 0
+let lastPercent = 0
+let turnId = ''
 
 type Shared = { at: number; limits: Limit[] }
 
@@ -504,6 +496,7 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     isBusy = true
+    turnId = e.turnId
     lastActive = await $.clock.now()
     await update($, activeAt, () => lastActive)
     return next(e)
@@ -550,7 +543,49 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (!isFull || e.surface === 'desktop' || e.props.hasSurvey || e.props.view.agentId) return next(e)
+    if (e.props.hasSurvey || e.props.view.agentId) return next(e)
+    if (e.surface === 'desktop') {
+      const ls = await read($, limits)
+      const cache = await read($, cacheLeft)
+      if (ls.length === 0 && cache < 0) return next(e)
+      // desktop footer slot is ≈220 px and clips, so everything sits in this band; Svg drew nothing in the footer — 2026-10-06
+      const { Box, Button, Text } = $.ui.resolve(e)
+      const now = Date.now()
+      const fill = '#262626'
+      const pill = (key: string, kids: unknown[]) => (
+        <Box key={key} flexDirection="row" alignItems="center" gap={1} paddingX={1} backgroundColor={fill}>
+          {kids}
+        </Box>
+      )
+      return (
+        <Box flexDirection="row" alignItems="center" justifyContent="space-between" width={e.props.bodyColumns}>
+          <Box flexDirection="row" alignItems="center" gap={2}>
+            {ls.slice(0, 2).map(l => {
+              const c = tone(l.percentUsed)
+              const n = Math.round(Math.min(l.percentUsed, 100) / 10)
+              return pill(l.kind, [
+                <Text key="n" dimColor>{shortNames[l.kind] ?? l.kind}</Text>,
+                <Text key="b">
+                  <Text color={c}>{'━'.repeat(n)}</Text>
+                  <Text color="gray">{'─'.repeat(10 - n)}</Text>
+                </Text>,
+                <Text key="p" bold color={c}>{Math.round(l.percentUsed)}%</Text>,
+                l.resetsAt ? <Text key="r" dimColor>↻ {resetIn(l.resetsAt, now)}</Text> : null,
+              ])
+            })}
+            <Button key="compact" label="⇊ Compact" onPress={() => compact($)} />
+          </Box>
+          {showsCache(cache, e.surface)
+            ? pill('cache', [
+                <Text key="t" bold={cache <= 0} color={cacheColor(cache)}>
+                  {cacheText(cache)}
+                </Text>,
+              ])
+            : null}
+        </Box>
+      )
+    }
+    if (!isFull) return next(e)
     metrics = { surface: e.surface, bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, viewport: e.viewport ?? null }
     const cur = await read($, live)
     const p = await read($, pending)
@@ -701,6 +736,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if (e.surface === 'desktop') return next(e)
     const ls = await read($, limits)
     const cache = await read($, cacheLeft)
     if (ls.length === 0 && cache < 0) return next(e)
@@ -709,11 +745,6 @@ export const register: Register = on => {
     const isAt = await read($, showResetAt)
     const five = ls.find(l => l.kind === 'five_hour')?.resetsAt
     const fiveLabel = five ? (isAt ? `о ${two(new Date(five).getHours())}:${two(new Date(five).getMinutes())}` : resetIn(five, now)) : ''
-    if (e.surface === 'desktop') {
-      const { Svg } = $.ui.resolve(e)
-      const shown = footerSvg(showsCache(cache, e.surface) ? cache : -1, ls)
-      return <Svg source={shown.source} alt={shown.alt} width={shown.width} height={FOOT_H} />
-    }
     return (
       <Box flexDirection="row" gap={2}>
         {e.props.modes.length > 0 ? <Text dimColor>{e.props.modes.join(' & ')}</Text> : null}

@@ -4,8 +4,8 @@ Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by
 
 | | Console | Desktop app |
 | --- | --- | --- |
-| Usage limits (5h, 7d) | footer | pills under prompt |
-| Cache timer | footer (after 5 min idle) | pills under prompt (always) |
+| Usage limits (5h, 7d) | footer | band above prompt |
+| Cache timer | footer (after 5 min idle) | band above prompt (always) |
 | Cache alert (toast + sound, 10 min before miss) | yes | yes |
 | Model / effort pickers | above prompt | - |
 | Side pane: message timer, Sessions, Resume, Compact, model, effort | yes | - |

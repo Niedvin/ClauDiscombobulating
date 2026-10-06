@@ -1,0 +1,67 @@
+import { expect, mock, test } from 'claude-code/testing'
+
+async function setup($: any, on: any, busy: boolean, startPct = 96) {
+  const ran: string[] = []
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('settings.read', () => ({ value: { effortLevel: 'high' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: startPct }] } }))
+  on('session.start', (_$: any, e: any) => ({ cwd: e.cwd }))
+  on('session.attach', (_$: any, e: any) => ({ clientId: e.clientId }))
+  on('session.measure', (_$: any, e: any) => ({ changed: e.changed }))
+  on('turn.start', (_$: any, e: any) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('turn.abort', (_$: any, e: any) => {
+    ran.push(`abort ${e.turnId}`)
+    return undefined as any
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('env.get', () => ({ value: undefined }))
+  on('command.run', (_$: any, e: any) => {
+    ran.push(`${e.command} ${e.args}`.trim())
+    return { text: e.command === 'effort' ? `Set effort level to ${e.args} (this session only): x` : 'ok' }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  if (busy) await $.turn.start({ text: 'work', turnId: 't1' })
+  return ran
+}
+
+const measure = (pct: number, resetsAt = '2030-01-01T00:00:00Z') => ({
+  context: { window: 1 },
+  rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt }],
+  changed: ['rateLimits' as const],
+})
+
+test('99% mid-turn: abort the turn, then compact once per window', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const ran = await setup($, on, true)
+  await $.session.measure(measure(98))
+  await clock.advance(3000)
+  expect(ran).toEqual([])
+
+  await $.session.measure(measure(99))
+  await clock.advance(3000)
+  expect(ran).toEqual(['abort t1', 'effort low', 'compact', 'effort high'])
+
+  await $.session.measure(measure(100))
+  await clock.advance(3000)
+  expect(ran.length).toBe(4)
+})
+
+test('check cadence follows the last seen percent: below 75% waits 5 min', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const ran = await setup($, on, false, 50)
+  await $.session.measure(measure(99))
+  await clock.advance(120000)
+  expect(ran).toEqual([])
+  await clock.advance(200000)
+  expect(ran).toEqual(['effort low', 'compact', 'effort high'])
+})
+
+test('99% while idle: compact without abort', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const ran = await setup($, on, false)
+  await $.session.measure(measure(99))
+  await clock.advance(3000)
+  expect(ran).toEqual(['effort low', 'compact', 'effort high'])
+})
