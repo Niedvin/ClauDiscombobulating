@@ -48,6 +48,7 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 ## Gotchas
 
 - Same-version update rewrites the plugin dir in place → a running session logs `plugin.json changed — names no hooks module now; register.tsx unloaded` and loses the mod until restart. Always bump `version` for a release.
+- Plugin/marketplace rename strands existing installs: the old `enabledPlugins` key survives and `claude plugin list` shows "Plugin <old> not found in marketplace <old>" — console runs with no mod at all. Reinstall under the new name: `claude plugin uninstall <old>@<old>` → `claude plugin marketplace remove <old>` → `claude plugin marketplace add Niedvin/<new>` → `claude plugin install <new>@<new>`; re-check `autoUpdate: true` in `extraKnownMarketplaces` (CLI add does not write it).
 - Python reading test output on Windows: decode stdin as UTF-8, or Cyrillic turns to mojibake.
 
 - Console test without a human: pywinpty + pyte in a temp venv, `claude` (no skip-permissions flag: the auto-mode classifier denies it) from a trusted cwd such as the home dir.
