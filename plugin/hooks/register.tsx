@@ -25,6 +25,7 @@ const CACHE_SHOW_BELOW = 55
 const ALERT_MIN = 10
 const AUTO_COMPACT_AT = 99
 const COMPACT_GRACE_MS = 600000
+const COMPACT_QUIET_MSGS = 5
 const ALERT_TITLE = 'ClauDiscombobulating'
 // no double quotes: argv reaches powershell.exe as one command line — 2026-10-06
 const ALERT_PS = `$ErrorActionPreference='Stop';Add-Type -AssemblyName PresentationCore;$p=New-Object System.Windows.Media.MediaPlayer;$p.Open([uri]$env:PB_SOUND);$p.Play();[void][Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime];[void][Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime];$x=New-Object Windows.Data.Xml.Dom.XmlDocument;$x.LoadXml('<toast><visual><binding template=''ToastGeneric''><text>'+$env:PB_TITLE+'</text><text>'+$env:PB_BODY+'</text></binding></visual><audio silent=''true''/></toast>');[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x));Start-Sleep -Seconds 5`
@@ -95,6 +96,7 @@ const alerted = atom({ plugin: 'ClauDiscombobulating', key: 'alerted' } as const
 // persisted per 5h window so a reload at 99% does not compact twice — 2026-10-06
 const compactedFor = atom({ plugin: 'ClauDiscombobulating', key: 'compactedFor' } as const, '')
 const compactedAt = atom({ plugin: 'ClauDiscombobulating', key: 'compactedAt' } as const, 0)
+const sinceCompact = atom({ plugin: 'ClauDiscombobulating', key: 'sinceCompact' } as const, COMPACT_QUIET_MSGS)
 const log = atom({ plugin: 'ClauDiscombobulating', key: 'log' } as const, [] as string[])
 
 const modelIndex = (id: string) => MODELS.findIndex(m => id.toLowerCase().includes(m.family))
@@ -132,6 +134,11 @@ async function note($: EngineInterface, line: string) {
     const home = await homeDir($)
     if (home) await $.fs.write(`${home}/.claude/mods/ClauDiscombobulating-debug.log`, (await read($, log)).join(String.fromCharCode(10)))
   } catch {}
+}
+
+async function countSinceCompact($: EngineInterface) {
+  const seen = await read($, sinceCompact)
+  if (seen < COMPACT_QUIET_MSGS) await update($, sinceCompact, () => seen + 1)
 }
 
 type SavedSettings = { effortLevel?: unknown; modelSettings?: Record<string, { effortLevel?: unknown }> }
@@ -265,6 +272,7 @@ async function compact($: EngineInterface) {
     await $.command.run({ command: 'compact' })
     const doneAt = await $.clock.now()
     await update($, compactedAt, () => doneAt)
+    await update($, sinceCompact, () => 0)
   } catch (err) {
     $.ui.toast(tr.compactFailed)
     await note($, `compact failed ${String(err)}`)
@@ -335,7 +343,10 @@ async function poll($: EngineInterface) {
   if (isBusy) lastActive = tick
   const left = cacheMinutes(tick)
   if (left !== (await read($, cacheLeft))) await update($, cacheLeft, () => left)
-  if (left > 0 && left <= ALERT_MIN && (await read($, alerted)) !== lastActive) {
+  const five = (await read($, limits)).find(l => l.kind === 'five_hour')
+  // quiet at 99%+ limits and until 5 turns pass after a compact — 2026-10-06
+  const quiet = (five?.percentUsed ?? 0) >= AUTO_COMPACT_AT || (await read($, sinceCompact)) < COMPACT_QUIET_MSGS
+  if (!quiet && left > 0 && left <= ALERT_MIN && (await read($, alerted)) !== lastActive) {
     await update($, alerted, () => lastActive)
     void alertCache($)
   }
@@ -583,6 +594,7 @@ export const register: Register = on => {
     if (e.trigger !== 'precompute' && !e.agentId && !r.skip) {
       const doneAt = await $.clock.now()
       await update($, compactedAt, () => doneAt)
+      await update($, sinceCompact, () => 0)
     }
     return r
   })
@@ -592,6 +604,7 @@ export const register: Register = on => {
     turnId = e.turnId
     lastActive = await $.clock.now()
     await update($, activeAt, () => lastActive)
+    await countSinceCompact($)
     return next(e)
   })
 
@@ -599,6 +612,7 @@ export const register: Register = on => {
     isBusy = false
     lastActive = await $.clock.now()
     await update($, activeAt, () => lastActive)
+    await countSinceCompact($)
     return next(e)
   })
 
