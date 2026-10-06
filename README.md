@@ -13,7 +13,7 @@ Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by
 | Model / effort pickers | above prompt | - |
 | Side pane: message timer, Sessions, Resume, Compact, model, effort | yes | - |
 
-- **Auto compact:** when the 5h limit reaches 99%, a running turn is stopped and `/compact` runs, once per 5h window. Better a controlled compact now than the work dying on its own and re-reading the whole context after the reset. It does not resume the work afterwards. The limit is checked every 5 min below 75%, every minute from 75%, every 30 s from 90%, every second from 95%.
+- **Auto compact:** when the 5h limit reaches 99%, a running turn is stopped and `/compact` runs, once per 5h window. Better a controlled compact now than the work dying on its own and re-reading the whole context after the reset. It does not resume the work afterwards. Skipped when a compaction (manual or the engine's own) already ran in the last 10 min. The limit is checked every 5 min below 75%, every minute from 75%, every 30 s from 90%, every second from 95%.
 - **Sessions** opens `/resume`. **Resume** sends `--resume` (console) and asks first when cache is already missed.
 - **Compact** on cache miss: switches to Sonnet low, compacts, restores model + effort.
 - **Language:** Ukrainian when the system language is Ukrainian, English otherwise (`d`, `h`, `m`, `send`, `cancel`, …). Force it with env `CLAUDISCOMBOBULATING_LANG=uk` or `en`.

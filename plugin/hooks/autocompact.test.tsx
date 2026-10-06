@@ -65,3 +65,39 @@ test('99% while idle: compact without abort', { timeoutMs: 20000 }, async ($, on
   await clock.advance(3000)
   expect(ran).toEqual(['effort low', 'compact', 'effort high'])
 })
+
+const summary = [{ role: 'assistant', text: 'summary', toolUses: [] }] as const
+const prompt = [{ role: 'user', text: 'hi', toolUses: [] }] as const
+
+test('a manual compact within the grace holds the auto compact, after it fires', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  on('session.compact', () => ({ messages: summary }))
+  const ran = await setup($, on, false)
+  await $.session.compact({ trigger: 'manual', messages: prompt })
+  await $.session.measure(measure(99))
+  await clock.advance(3000)
+  expect(ran).toEqual([])
+
+  await clock.advance(600001)
+  expect(ran).toEqual(['effort low', 'compact', 'effort high'])
+})
+
+test('a skipped compact does not hold the auto compact', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  on('session.compact', () => ({ skip: 'nope' }))
+  const ran = await setup($, on, false)
+  await $.session.compact({ trigger: 'manual', messages: prompt })
+  await $.session.measure(measure(99))
+  await clock.advance(3000)
+  expect(ran).toEqual(['effort low', 'compact', 'effort high'])
+})
+
+test('a precompute compact does not hold the auto compact', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  on('session.compact', () => ({ messages: summary }))
+  const ran = await setup($, on, false)
+  await $.session.compact({ trigger: 'precompute', messages: prompt })
+  await $.session.measure(measure(99))
+  await clock.advance(3000)
+  expect(ran).toEqual(['effort low', 'compact', 'effort high'])
+})

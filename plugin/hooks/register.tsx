@@ -24,6 +24,7 @@ const CACHE_TTL_MS = 3600000
 const CACHE_SHOW_BELOW = 55
 const ALERT_MIN = 10
 const AUTO_COMPACT_AT = 99
+const COMPACT_GRACE_MS = 600000
 const ALERT_TITLE = 'ClauDiscombobulating'
 // no double quotes: argv reaches powershell.exe as one command line — 2026-10-06
 const ALERT_PS = `$ErrorActionPreference='Stop';Add-Type -AssemblyName PresentationCore;$p=New-Object System.Windows.Media.MediaPlayer;$p.Open([uri]$env:PB_SOUND);$p.Play();[void][Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime];[void][Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime];$x=New-Object Windows.Data.Xml.Dom.XmlDocument;$x.LoadXml('<toast><visual><binding template=''ToastGeneric''><text>'+$env:PB_TITLE+'</text><text>'+$env:PB_BODY+'</text></binding></visual><audio silent=''true''/></toast>');[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x));Start-Sleep -Seconds 5`
@@ -93,6 +94,7 @@ const activeAt = atom({ plugin: 'ClauDiscombobulating', key: 'activeAt' } as con
 const alerted = atom({ plugin: 'ClauDiscombobulating', key: 'alerted' } as const, 0)
 // persisted per 5h window so a reload at 99% does not compact twice — 2026-10-06
 const compactedFor = atom({ plugin: 'ClauDiscombobulating', key: 'compactedFor' } as const, '')
+const compactedAt = atom({ plugin: 'ClauDiscombobulating', key: 'compactedAt' } as const, 0)
 const log = atom({ plugin: 'ClauDiscombobulating', key: 'log' } as const, [] as string[])
 
 const modelIndex = (id: string) => MODELS.findIndex(m => id.toLowerCase().includes(m.family))
@@ -261,6 +263,8 @@ async function compact($: EngineInterface) {
     // a model switch makes the app re-send its own effort, so low is set after it — 2026-10-06
     if (isSwitch || effort !== 'low') await $.command.run({ command: 'effort', args: 'low' })
     await $.command.run({ command: 'compact' })
+    const doneAt = await $.clock.now()
+    await update($, compactedAt, () => doneAt)
   } catch (err) {
     $.ui.toast(tr.compactFailed)
     await note($, `compact failed ${String(err)}`)
@@ -285,6 +289,7 @@ async function autoCompact($: EngineInterface) {
   lastCheck = now
   lastPercent = five?.percentUsed ?? 0
   if (!five || five.percentUsed < AUTO_COMPACT_AT || isCompacting) return
+  if (now - (await read($, compactedAt)) < COMPACT_GRACE_MS) return
   const key = five.resetsAt ?? 'none'
   if ((await read($, compactedFor)) === key) return
   isCompacting = true
@@ -570,6 +575,16 @@ export const register: Register = on => {
     await update($, limits, () => ls)
     if (ls.length > 0) await shareLimits($, ls).catch(() => undefined)
     return next(e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    // only a real main-transcript compaction counts: not precompute, not a subagent, not a skip — 2026-10-06
+    if (e.trigger !== 'precompute' && !e.agentId && !r.skip) {
+      const doneAt = await $.clock.now()
+      await update($, compactedAt, () => doneAt)
+    }
+    return r
   })
 
   on('turn.start', async ($, e, next) => {

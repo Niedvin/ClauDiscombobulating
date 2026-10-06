@@ -6,6 +6,6 @@ export type Draft = { h: number; m: number; isSet: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
-    'ClauDiscombobulating': { limits: Limit[]; live: Live; pending: Pending; flag: string; log: string[]; paneUp: boolean; timer: Timer; draft: Draft; showResetAt: boolean; cacheLeft: number; activeAt: number; alerted: number; compactedFor: string }
+    'ClauDiscombobulating': { limits: Limit[]; live: Live; pending: Pending; flag: string; log: string[]; paneUp: boolean; timer: Timer; draft: Draft; showResetAt: boolean; cacheLeft: number; activeAt: number; alerted: number; compactedFor: string; compactedAt: number }
   }
 }
