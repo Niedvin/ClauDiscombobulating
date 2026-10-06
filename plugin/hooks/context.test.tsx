@@ -26,7 +26,7 @@ test('terminal: the context counter draws above the prompt, beside the pickers',
   await clock.advance(1100)
   const band = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'terminal', component: 'AbovePrompt', props: BAND })
   const s = JSON.stringify(await band.drawn())
-  expect(s).toContain('контекст 23% · 46k/200k')
+  expect(s).toContain('46k/200k')
   expect(s).toContain('Opus 5.5')
 })
 
@@ -37,7 +37,7 @@ test('terminal with the pane up: the counter stays, the pickers hide', { timeout
   await clock.advance(1100)
   const band = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'terminal', component: 'AbovePrompt', props: BAND })
   const s = JSON.stringify(await band.drawn())
-  expect(s).toContain('контекст 23% · 46k/200k')
+  expect(s).toContain('46k/200k')
   expect(s).not.toContain('Opus 5.5')
 })
 
@@ -50,5 +50,5 @@ test('desktop: the context counter draws on the line under the prompt', { timeou
   const hint = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'desktop', component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' } })
   const s = JSON.stringify(await hint.drawn())
   expect(s).toContain('? for shortcuts')
-  expect(s).toContain('контекст 23% · 46k/200k')
+  expect(s).toContain('46k/200k')
 })

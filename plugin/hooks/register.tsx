@@ -38,7 +38,6 @@ const UK = {
   min: 'хв',
   day: 'д',
   cache: 'кеш',
-  ctx: 'контекст',
   at: 'о',
   via: 'через',
   alertBody: 'Кеш: лишилось 10 хв',
@@ -64,7 +63,6 @@ const EN: typeof UK = {
   min: 'm',
   day: 'd',
   cache: 'cache',
-  ctx: 'ctx',
   at: 'at',
   via: 'in',
   alertBody: 'Cache: 10 min left',
@@ -164,7 +162,7 @@ const two = (n: number) => String(n).padStart(2, '0')
 const cacheText = (min: number) => (min <= 0 ? '⚠ Cache Miss' : `${tr.cache} ${min}${tr.min}`)
 const cacheColor = (min: number) => (min <= 5 ? '#ef5b5b' : min <= 15 ? '#f0b429' : '#3fbf8f')
 const kTok = (n: number) => (n >= 1000000 ? `${Math.round(n / 100000) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
-const ctxLabel = (c: Context) => (c.percent < 0 || !c.window ? '' : `${tr.ctx} ${c.percent}% · ${kTok(c.tokens)}/${kTok(c.window)}`)
+const ctxLabel = (c: Context) => (c.window > 0 ? `${kTok(c.tokens)}/${kTok(c.window)}` : '')
 
 // minutes until the 1h prompt cache lapses; -1 while a turn runs or before any turn — 2026-10-06
 function cacheMinutes(now: number) {
@@ -217,12 +215,6 @@ async function alertCache($: EngineInterface) {
 async function alertQuiet($: EngineInterface) {
   const five = (await read($, limits)).find(l => l.kind === 'five_hour')
   return (five?.percentUsed ?? 0) >= AUTO_COMPACT_AT || (await read($, sinceCompact)) < COMPACT_QUIET_MSGS
-}
-
-function clockOf(iso: string) {
-  const d = new Date(iso)
-  const isFar = d.getTime() - Date.now() > 86400000
-  return isFar ? `${two(d.getDate())}.${two(d.getMonth() + 1)}` : `${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
 function nextAt(h: number, m: number, now: number) {
@@ -384,10 +376,8 @@ async function poll($: EngineInterface) {
   }
   void autoCompact($).catch(err => note($, `auto compact failed ${String(err)}`))
   if (!isFull) return
-  if (isTerminal) {
-    const up = (await $.ui.panes().catch(() => [])).some(x => x.id === PANE && x.isPlaced && x.isShown)
-    if (up !== (await read($, paneUp))) await update($, paneUp, () => up)
-  }
+  const up = (await $.ui.panes().catch(() => [])).some(x => x.id === PANE && x.isPlaced && x.isShown)
+  if (up !== (await read($, paneUp))) await update($, paneUp, () => up)
   const model = await $.session.model()
   const raw = ((await $.settings.read({ source: 'flag' })) as { effortLevel?: unknown }).effortLevel
   const flagEffort = typeof raw === 'string' ? raw : ''
@@ -421,7 +411,6 @@ async function poll($: EngineInterface) {
   if (nextLive !== cur) await update($, live, () => nextLive)
 }
 
-let isTerminal = false
 let isFull = false
 let sharedAt = 0
 let lastActive = 0
@@ -552,7 +541,6 @@ const onCommand: Hook<'command.run'> = async ($, e, next) => {
 async function enableFull($: EngineInterface, why: string) {
   if (isFull) return
   isFull = true
-  isTerminal = true
   await $.command.register({ name: 'ClauDiscombobulating', description: 'Open the model and effort pane' })
   await openPane($, why)
   for (const m of MODELS) {
@@ -581,6 +569,10 @@ export const register: Register = on => {
       const u = await $.session.usage()
       await update($, limits, () => u.rateLimits.map(l => ({ ...l })))
       await poll($)
+      const p = await read($, pending)
+      // a reload inside the pick debounce leaves pending set: re-arm the apply — 2026-10-06
+      if (p.model) modelTimer = $.clock.after(APPLY_MS, () => void applyModel($))
+      if (p.effort) effortTimer = $.clock.after(APPLY_MS, () => void applyEffort($))
       const seen = e.surface ? [e.surface] : await $.session.surfaces().catch(() => [])
       const other = seen.find(x => x !== 'desktop')
       if (other) await enableFull($, `start surface=${other}`)
@@ -600,8 +592,10 @@ export const register: Register = on => {
   on('classic.SessionStart', async ($, e, next) => {
     const secs = e.seconds_since_last_response
     if (typeof secs === 'number') {
-      lastActive = (await $.clock.now()) - secs * 1000
-      await update($, activeAt, () => lastActive)
+      try {
+        lastActive = (await $.clock.now()) - secs * 1000
+        await update($, activeAt, () => lastActive)
+      } catch {}
     }
     return next(e)
   })
@@ -616,10 +610,12 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     // only a real main-transcript compaction counts: not precompute, not a subagent, not a skip — 2026-10-06
-    if (e.trigger !== 'precompute' && !e.agentId && !r.skip) {
-      const doneAt = await $.clock.now()
-      await update($, compactedAt, () => doneAt)
-      await update($, sinceCompact, () => 0)
+    if (e.trigger !== 'precompute' && !e.agentId && !r?.skip) {
+      try {
+        const doneAt = await $.clock.now()
+        await update($, compactedAt, () => doneAt)
+        await update($, sinceCompact, () => 0)
+      } catch {}
     }
     return r
   })
@@ -658,23 +654,27 @@ export const register: Register = on => {
   on('command.run', { command: 'model' }, onCommand)
 
   on('tool.call', { tool: 'mcp__ClauDiscombobulating__probe' }, async $ => {
-    const merged = (await $.settings.read()) as { effortLevel?: unknown; model?: unknown }
-    const fromApp = (await $.settings.read({ source: 'flag' })) as { effortLevel?: unknown; model?: unknown }
-    const commands = (await $.command.list()).map(c => c.name).filter(n => /^(model|effort)$/.test(n))
-    const data = {
-      version: 3,
-      model: await $.session.model(),
-      settings: { merged: { effortLevel: merged.effortLevel, model: merged.model }, flag: { effortLevel: fromApp.effortLevel } },
-      live: await read($, live),
-      pending: await read($, pending),
-      flag: await read($, flag),
-      surfaces: await $.session.surfaces(),
-      commands,
-      metrics,
-      paneRows,
-      log: await read($, log),
+    try {
+      const merged = (await $.settings.read()) as { effortLevel?: unknown; model?: unknown }
+      const fromApp = (await $.settings.read({ source: 'flag' })) as { effortLevel?: unknown; model?: unknown }
+      const commands = (await $.command.list()).map(c => c.name).filter(n => /^(model|effort)$/.test(n))
+      const data = {
+        version: 3,
+        model: await $.session.model(),
+        settings: { merged: { effortLevel: merged.effortLevel, model: merged.model }, flag: { effortLevel: fromApp.effortLevel } },
+        live: await read($, live),
+        pending: await read($, pending),
+        flag: await read($, flag),
+        surfaces: await $.session.surfaces(),
+        commands,
+        metrics,
+        paneRows,
+        log: await read($, log),
+      }
+      return { result: JSON.stringify(data, null, 1) }
+    } catch (err) {
+      return { result: `probe failed: ${String(err)}` }
     }
-    return { result: JSON.stringify(data, null, 1) }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -791,9 +791,9 @@ export const register: Register = on => {
     const now = Date.now()
     if (now - lastWheel < WHEEL_GAP_MS) return {}
     lastWheel = now
-    if (zone === 'model') await pick($, 'model', dir)
-    else if (zone === 'effort') await pick($, 'effort', dir)
-    else if (!(await read($, timer)).at) await nudgeDraft($, (e.pointer?.column ?? 0) < paneWidth / 2 ? 'h' : 'm', dir)
+    if (zone === 'model') await pick($, 'model', dir).catch(() => undefined)
+    else if (zone === 'effort') await pick($, 'effort', dir).catch(() => undefined)
+    else if (!(await read($, timer).catch(() => ({ at: 0 }))).at) await nudgeDraft($, (e.pointer?.column ?? 0) < paneWidth / 2 ? 'h' : 'm', dir).catch(() => undefined)
     else return next(e)
     return {}
   })
