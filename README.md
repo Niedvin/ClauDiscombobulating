@@ -2,6 +2,8 @@
 
 Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by app.
 
+![ClauDiscombobulating in the console: side pane with timer, Sessions, Resume, Compact, model and effort; limits and cache timer in the footer](docs/preview.png)
+
 | | Console | Desktop app |
 | --- | --- | --- |
 | Usage limits (5h, 7d) | footer | band above prompt |
