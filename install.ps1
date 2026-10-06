@@ -29,6 +29,8 @@ $markets = (& claude plugin marketplace list --json 2>$null | ConvertFrom-Json)
 $hasMarket = [bool]($markets | Where-Object { $_.name -eq $Market })
 $plugins = (& claude plugin list --json 2>$null | ConvertFrom-Json)
 $hasPlugin = [bool]($plugins | Where-Object { $_.id -eq $Plugin })
+$hasLegacy = [bool]($plugins | Where-Object { $_.id -eq 'prompt-bar@prompt-bar-local' })
+$hasLegacyMarket = [bool]($markets | Where-Object { $_.name -eq 'prompt-bar-local' })
 
 if ($Uninstall) {
   if ($hasPlugin) { Invoke-Claude @('plugin', 'uninstall', $Plugin, '--scope', 'user') }
@@ -39,6 +41,8 @@ if ($Uninstall) {
 
 if (-not (Test-Path (Join-Path $Root 'plugin/.claude-plugin/plugin.json'))) { throw "plugin folder missing in $Root" }
 Invoke-Claude @('plugin', 'validate', (Join-Path $Root 'plugin'))
+if ($hasLegacy) { Invoke-Claude @('plugin', 'uninstall', 'prompt-bar@prompt-bar-local', '--scope', 'user') }
+if ($hasLegacyMarket) { Invoke-Claude @('plugin', 'marketplace', 'remove', 'prompt-bar-local') }
 if ($hasPlugin) { Invoke-Claude @('plugin', 'uninstall', $Plugin, '--scope', 'user') }
 if ($hasMarket) { Invoke-Claude @('plugin', 'marketplace', 'remove', $Market) }
 Invoke-Claude @('plugin', 'marketplace', 'add', $(if ($Repo) { $Repo } else { $Root }))
