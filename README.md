@@ -68,3 +68,4 @@ Updates are pulled only when `version` in `plugin/.claude-plugin/plugin.json` go
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Niedvin/ClauDiscombobulating/main/install.sh | bash -s -- --uninstall
 ```
+

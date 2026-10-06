@@ -84,3 +84,4 @@ claude plugin marketplace add "$REPO"
 claude plugin install "$PLUGIN" --scope user
 set_autoupdate 1
 echo "ClauDiscombobulating installed. Restart Claude Code and the desktop app."
+

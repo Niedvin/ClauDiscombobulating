@@ -918,3 +918,4 @@ export const register: Register = on => {
     )
   })
 }
+

@@ -74,3 +74,4 @@ test(`cache timer on ${surface}: 55 down to 0, terminal hides first 5 min`, { ti
   expect(await text()).not.toContain('кеш')
 })
 }
+

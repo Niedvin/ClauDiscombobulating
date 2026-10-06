@@ -25,3 +25,4 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(JSON.stringify(await mode.drawn())).toContain('кеш 20хв')
   })
 }
+

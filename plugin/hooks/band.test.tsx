@@ -76,3 +76,4 @@ test('desktop compact button: effort low, compact, effort back', { timeoutMs: 20
   await band.press({ key: 'compact' })
   expect(ran).toEqual(['effort low', 'compact', 'effort xhigh'])
 })
+

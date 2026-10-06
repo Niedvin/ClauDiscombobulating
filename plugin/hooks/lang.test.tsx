@@ -64,3 +64,4 @@ test('nothing detectable falls back to english', { timeoutMs: 20000 }, async ($,
   const { text } = await band($, on, {})
   expect(text).toContain('cache 54m')
 })
+

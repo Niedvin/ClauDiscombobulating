@@ -86,3 +86,4 @@ Invoke-Claude @('plugin', 'install', $Plugin, '--scope', 'user')
 if ($Repo) { Set-AutoUpdate $true $Repo }
 if (-not $WhatIfPreference) { Write-Host 'ClauDiscombobulating installed. Restart Claude Code and the desktop app.' }
 
+

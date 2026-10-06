@@ -10,3 +10,4 @@ declare module 'claude-code' {
     'ClauDiscombobulating': { limits: Limit[]; live: Live; pending: Pending; flag: string; log: string[]; paneUp: boolean; timer: Timer; draft: Draft; showResetAt: boolean; cacheLeft: number; activeAt: number; alerted: number; compactedFor: string; compactedAt: number; sinceCompact: number; context: Context }
   }
 }
+

@@ -52,3 +52,4 @@ test('desktop: the context counter draws on the line under the prompt', { timeou
   expect(s).toContain('? for shortcuts')
   expect(s).toContain('46k/200k')
 })
+

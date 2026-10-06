@@ -44,3 +44,4 @@ test('compact on cache miss while already on sonnet keeps the model', { timeoutM
   const clock = mock.clock(on, { now: 1_000_000 })
   expect(await run($, on, clock, 61, 'claude-sonnet-5-5', 'high')).toEqual(['effort low', 'compact', 'effort high'])
 })
+

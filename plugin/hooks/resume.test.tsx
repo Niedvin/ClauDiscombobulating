@@ -111,3 +111,4 @@ test('pane order: timer on top, then Sessions, Resume, Compact', { timeoutMs: 20
   expect(at('Resume')).toBeLessThan(at('Compact'))
   expect(at('Compact')).toBeLessThan(at('Opus'))
 })
+

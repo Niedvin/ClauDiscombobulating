@@ -64,3 +64,4 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 Published as marketplace `ClauDiscombobulating` (repo root has `.claude-plugin/marketplace.json`). Users: `.\install.ps1 -Repo Niedvin/ClauDiscombobulating` — also writes `extraKnownMarketplaces.ClauDiscombobulating` (github source, `autoUpdate: true`) into `settings.json` (backup in `.backups/`); `-Uninstall` removes it. Local install leaves settings alone.
 
 Release: bump `version` in `plugin.json`, commit, push. Installed copies pull it.
+

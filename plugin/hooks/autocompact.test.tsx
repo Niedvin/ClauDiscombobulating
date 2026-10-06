@@ -110,3 +110,4 @@ test('a subagent turn does not clear isBusy: 99% still aborts the main turn', { 
   await clock.advance(3000)
   expect(ran).toEqual(['abort t1', 'effort low', 'compact', 'effort high'])
 })
+
