@@ -9,6 +9,7 @@ Switch: `isFull` (set by `enableFull`). Desktop app runs the CLI headless: `sess
 
 ## Layout
 
+- `install.sh` — macOS/Linux installer, GitHub copy only (`curl … | bash`, `--uninstall`). Same auto-update write as `install.ps1`.
 - `install.ps1` — installer. `.\install.ps1` / `-Uninstall` / `-WhatIf`. User scope, covers console + desktop.
 - `.claude-plugin/marketplace.json` — marketplace `prompt-bar`, plugin at `./plugin`. Repo: github.com/Niedvin/prompt-bar (public).
 - `plugin/.claude-plugin/plugin.json` — manifest. Bump version on every release (auto-update keys on it).

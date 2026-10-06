@@ -16,30 +16,35 @@ Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by
 
 ## Install
 
-Needs the `claude` CLI.
+Needs the `claude` CLI. One line, nothing to clone.
+
+**Windows** (PowerShell):
 
 ```powershell
-git clone https://github.com/Niedvin/prompt-bar
-.\prompt-bar\install.ps1 -Repo Niedvin/prompt-bar
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.ps1)))
 ```
 
-or by hand:
+**macOS / Linux**:
 
-```
-claude plugin marketplace add Niedvin/prompt-bar
-claude plugin install prompt-bar@prompt-bar --scope user
+```bash
+curl -fsSL https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.sh | bash
 ```
 
 Restart Claude Code and the desktop app.
 
-## Auto-update
+### Why the script and not the two manual commands
 
-Add to `~/.claude/settings.json`:
+- **Auto-update is on from the start.** The script writes the `autoUpdate` entry into `settings.json` for you. With the manual commands the mod never updates, until you edit that file by hand.
+- **Safe reinstall.** An old copy is removed first, so rerunning the line repairs a broken install or switches an old one to the GitHub copy.
+- **Your settings stay.** Only one key is touched. `settings.json` is copied to `.backups/` before each change.
+- **One line to undo.** The same script with `-Uninstall` (Windows) or `--uninstall` (macOS / Linux) removes the plugin, the marketplace and the auto-update entry.
+- **Same result on every system.** One source of truth, no copy-pasting JSON.
 
-```json
-"extraKnownMarketplaces": {
-  "prompt-bar": { "source": { "source": "github", "repo": "Niedvin/prompt-bar" }, "autoUpdate": true }
-}
+By hand (no auto-update):
+
+```
+claude plugin marketplace add Niedvin/prompt-bar
+claude plugin install prompt-bar@prompt-bar --scope user
 ```
 
 Updates are pulled only when `version` in `plugin/.claude-plugin/plugin.json` goes up.
@@ -47,7 +52,11 @@ Updates are pulled only when `version` in `plugin/.claude-plugin/plugin.json` go
 ## Uninstall
 
 ```powershell
-.\install.ps1 -Uninstall
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.ps1))) -Uninstall
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.sh | bash -s -- --uninstall
 ```
 
 ## Dev

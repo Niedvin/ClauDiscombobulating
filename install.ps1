@@ -13,6 +13,8 @@ param([switch]$Uninstall, [string]$Repo)
 
 $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
+# piped from GitHub there is no local folder, so the GitHub copy is the only source — 2026-10-06
+if (-not $Root -and -not $Repo) { $Repo = 'Niedvin/prompt-bar' }
 $Market = 'prompt-bar'
 $Plugin = "prompt-bar@$Market"
 
@@ -70,8 +72,9 @@ if ($Uninstall) {
   return
 }
 
-if (-not (Test-Path (Join-Path $Root 'plugin/.claude-plugin/plugin.json'))) { throw "plugin folder missing in $Root" }
-Invoke-Claude @('plugin', 'validate', (Join-Path $Root 'plugin'))
+$hasLocal = $Root -and (Test-Path (Join-Path $Root 'plugin/.claude-plugin/plugin.json'))
+if (-not $hasLocal -and -not $Repo) { throw "plugin folder missing in $Root" }
+if ($hasLocal) { Invoke-Claude @('plugin', 'validate', (Join-Path $Root 'plugin')) }
 if ($hasLegacy) { Invoke-Claude @('plugin', 'uninstall', 'prompt-bar@prompt-bar-local', '--scope', 'user') }
 if ($hasLegacyMarket) { Invoke-Claude @('plugin', 'marketplace', 'remove', 'prompt-bar-local') }
 if ($hasPlugin) { Invoke-Claude @('plugin', 'uninstall', $Plugin, '--scope', 'user') }
