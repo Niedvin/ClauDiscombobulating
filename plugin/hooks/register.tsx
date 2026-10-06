@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Hook, Register, Timer } from 'claude-code'
 
-import type { Draft, Limit, Live, Pending, Timer as Alarm } from '../types'
+import type { Context, Draft, Limit, Live, Pending, Timer as Alarm } from '../types'
 
 // aliases: the engine resolves each to the newest model of the family — 2026-10-02
 const MODELS = [
@@ -38,6 +38,7 @@ const UK = {
   min: 'хв',
   day: 'д',
   cache: 'кеш',
+  ctx: 'контекст',
   at: 'о',
   via: 'через',
   alertBody: 'Кеш: лишилось 10 хв',
@@ -63,6 +64,7 @@ const EN: typeof UK = {
   min: 'm',
   day: 'd',
   cache: 'cache',
+  ctx: 'ctx',
   at: 'at',
   via: 'in',
   alertBody: 'Cache: 10 min left',
@@ -97,6 +99,7 @@ const alerted = atom({ plugin: 'ClauDiscombobulating', key: 'alerted' } as const
 const compactedFor = atom({ plugin: 'ClauDiscombobulating', key: 'compactedFor' } as const, '')
 const compactedAt = atom({ plugin: 'ClauDiscombobulating', key: 'compactedAt' } as const, 0)
 const sinceCompact = atom({ plugin: 'ClauDiscombobulating', key: 'sinceCompact' } as const, COMPACT_QUIET_MSGS)
+const context = atom({ plugin: 'ClauDiscombobulating', key: 'context' } as const, { tokens: 0, window: 0, percent: -1 } as Context)
 const log = atom({ plugin: 'ClauDiscombobulating', key: 'log' } as const, [] as string[])
 
 const modelIndex = (id: string) => MODELS.findIndex(m => id.toLowerCase().includes(m.family))
@@ -160,6 +163,8 @@ const two = (n: number) => String(n).padStart(2, '0')
 
 const cacheText = (min: number) => (min <= 0 ? '⚠ Cache Miss' : `${tr.cache} ${min}${tr.min}`)
 const cacheColor = (min: number) => (min <= 5 ? '#ef5b5b' : min <= 15 ? '#f0b429' : '#3fbf8f')
+const kTok = (n: number) => (n >= 1000000 ? `${Math.round(n / 100000) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
+const ctxLabel = (c: Context) => (c.percent < 0 || !c.window ? '' : `${tr.ctx} ${c.percent}% · ${kTok(c.tokens)}/${kTok(c.window)}`)
 
 // minutes until the 1h prompt cache lapses; -1 while a turn runs or before any turn — 2026-10-06
 function cacheMinutes(now: number) {
@@ -197,11 +202,15 @@ const showsCache = (min: number, surface: string) => min >= 0 && (surface === 'd
 
 async function alertCache($: EngineInterface) {
   $.ui.toast(tr.alertBody)
-  if ((await $.env.get('OS').catch(() => undefined)) !== 'Windows_NT') return
-  const sound = encodeURI(`file:///${$.plugin.root.replace(/\\/g, '/')}/assets/cache-alert.mp3`)
-  const env = { PB_SOUND: sound, PB_TITLE: ALERT_TITLE, PB_BODY: tr.alertBody }
-  const argv = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ALERT_PS]
-  await $.process.run(argv, { env, timeoutMs: 20000 }).catch(err => note($, `alert failed ${String(err)}`))
+  if ((await $.env.get('OS').catch(() => undefined)) === 'Windows_NT') {
+    const sound = encodeURI(`file:///${$.plugin.root.replace(/\\/g, '/')}/assets/cache-alert.mp3`)
+    const env = { PB_SOUND: sound, PB_TITLE: ALERT_TITLE, PB_BODY: tr.alertBody }
+    const argv = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ALERT_PS]
+    await $.process.run(argv, { env, timeoutMs: 20000 }).catch(err => note($, `alert failed ${String(err)}`))
+    return
+  }
+  // the engine plays the clip with afplay on macOS and skips it where there is no player — 2026-10-06
+  await $.audio.play({ asset: 'assets/cache-alert.mp3' }).catch(err => note($, `alert failed ${String(err)}`))
 }
 
 function clockOf(iso: string) {
@@ -351,6 +360,13 @@ async function poll($: EngineInterface) {
     void alertCache($)
   }
   await adoptShared($).catch(() => undefined)
+  const u = await $.session.usage().catch(() => undefined)
+  const c = u?.context
+  if (c) {
+    const fresh: Context = { tokens: c.tokens ?? 0, window: c.window ?? 0, percent: typeof c.percent === 'number' ? Math.round(c.percent) : c.tokens && c.window ? Math.round((c.tokens / c.window) * 100) : -1 }
+    const seen = await read($, context)
+    if (seen.tokens !== fresh.tokens || seen.window !== fresh.window || seen.percent !== fresh.percent) await update($, context, () => fresh)
+  }
   const now = Date.now()
   const ls = await read($, limits)
   if (ls.some(l => l.resetsAt && Date.parse(l.resetsAt) <= now)) {
@@ -698,8 +714,9 @@ export const register: Register = on => {
     const p = await read($, pending)
     const model = p.model || cur.model
     const effort = p.effort || cur.effort
-
-    if (await read($, paneUp)) return next(e)
+    const label = ctxLabel(await read($, context))
+    const up = await read($, paneUp)
+    if (up && !label) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const i = modelIndex(model)
     const hue = MODELS[i]?.hue ?? 'gray'
@@ -708,30 +725,43 @@ export const register: Register = on => {
     const effortColor = isOn && f >= 0 ? EFFORT_COLORS[f] : 'gray'
     return (
       <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap={1} width={e.props.bodyColumns}>
-        <Button key="to-pane" plain dimColor label={tr.toPane} onPress={() => openPane($, 'button')} />
-        <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={hue} paddingX={1}>
-          <Button key="m-prev" plain dimColor label="◀" onPress={() => pick($, 'model', -1)} />
-          <Text bold color={hue}>
-            {modelLabel(model)}
-            {p.model ? ' •' : ''}
-          </Text>
-          <Button key="m-next" plain dimColor label="▶" onPress={() => pick($, 'model', 1)} />
-        </Box>
-        <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={effortColor} paddingX={1}>
-          <Button key="e-prev" plain dimColor label="◀" onPress={() => pick($, 'effort', -1)} />
-          <Text bold color={effortColor}>
-            {isOn ? effort || 'auto' : 'n/a'}
-            {p.effort ? ' •' : ''}
-          </Text>
-          <Text>
-            {EFFORTS.map((lv, k) => (
-              <Text key={lv} color={isOn && f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k]}</Text>
-            ))}
-          </Text>
-          <Button key="e-next" plain dimColor label="▶" onPress={() => pick($, 'effort', 1)} />
-        </Box>
+        {label ? <Text dimColor>{label}</Text> : null}
+        {up ? null : (
+          <Box key="pick" flexDirection="row" alignItems="center" gap={1}>
+            <Button key="to-pane" plain dimColor label={tr.toPane} onPress={() => openPane($, 'button')} />
+            <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={hue} paddingX={1}>
+              <Button key="m-prev" plain dimColor label="◀" onPress={() => pick($, 'model', -1)} />
+              <Text bold color={hue}>
+                {modelLabel(model)}
+                {p.model ? ' •' : ''}
+              </Text>
+              <Button key="m-next" plain dimColor label="▶" onPress={() => pick($, 'model', 1)} />
+            </Box>
+            <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={effortColor} paddingX={1}>
+              <Button key="e-prev" plain dimColor label="◀" onPress={() => pick($, 'effort', -1)} />
+              <Text bold color={effortColor}>
+                {isOn ? effort || 'auto' : 'n/a'}
+                {p.effort ? ' •' : ''}
+              </Text>
+              <Text>
+                {EFFORTS.map((lv, k) => (
+                  <Text key={lv} color={isOn && f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k]}</Text>
+                ))}
+              </Text>
+              <Button key="e-next" plain dimColor label="▶" onPress={() => pick($, 'effort', 1)} />
+            </Box>
+          </Box>
+        )}
       </Box>
     )
+  })
+
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    if (e.surface !== 'desktop') return next(e)
+    const label = ctxLabel(await read($, context))
+    if (!label) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return <Text dimColor>{`${e.props.hint}${e.props.hint ? '  ·  ' : ''}${label}`}</Text>
   })
 
   on('command.run', { command: 'ClauDiscombobulating' }, async $ => {

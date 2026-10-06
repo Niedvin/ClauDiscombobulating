@@ -11,6 +11,7 @@ Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by
 | Cache alert (toast + sound, 10 min before miss; off at 99%+ limits or right after a compact) | yes | yes |
 | Auto compact at 99% of the 5h limit | yes | yes |
 | Model / effort pickers | above prompt | - |
+| Context usage counter | above the prompt (right) | under the prompt |
 | Side pane: message timer, Sessions, Resume, Compact, model, effort | yes | - |
 
 - **Auto compact:** when the 5h limit reaches 99%, a running turn is stopped and `/compact` runs, once per 5h window. Better a controlled compact now than the work dying on its own and re-reading the whole context after the reset. It does not resume the work afterwards. Skipped when a compaction (manual or the engine's own) already ran in the last 10 min. The limit is checked every 5 min below 75%, every minute from 75%, every 30 s from 90%, every second from 95%.
@@ -18,7 +19,7 @@ Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by
 - **Compact** on cache miss: switches to Sonnet low, compacts, restores model + effort.
 - **Language:** Ukrainian when the system language is Ukrainian, English otherwise (`d`, `h`, `m`, `send`, `cancel`, …). Force it with env `CLAUDISCOMBOBULATING_LANG=uk` or `en`.
 - **Limits shared between sessions:** every session shows the freshest limits, not only after its own first reply. Works on Windows, macOS and Linux.
-- Cache alert sound: `plugin/assets/cache-alert.mp3`, installed with the plugin. Toast + sound are Windows only; other systems get the in-app toast.
+- Cache alert sound: `plugin/assets/cache-alert.mp3`, installed with the plugin. Windows: system toast + sound. macOS: sound (system player, `afplay`) + in-app toast. Other systems: in-app toast only.
 
 ## Install
 

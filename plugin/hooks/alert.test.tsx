@@ -38,6 +38,28 @@ test('cache alert: one toast + sound script per idle period, 10 min before miss'
   expect(runs.length).toBe(2)
 })
 
+test('cache alert on macOS: the engine plays the clip', { timeoutMs: 30000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const played: unknown[] = []
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [] } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.attach', (_$, e) => ({ clientId: e.clientId }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('env.get', (_$, e) => ({ value: e.name === 'CLAUDISCOMBOBULATING_LANG' ? 'uk' : undefined }))
+  on('audio.play', (_$, e) => {
+    played.push(e.clip)
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(51 * 60000)
+  expect(played).toEqual([{ asset: 'assets/cache-alert.mp3' }])
+})
+
 test('no cache alert while the 5h limit sits at 99%+', { timeoutMs: 30000 }, async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   const runs: { argv: readonly string[]; env: Record<string, string> | undefined }[] = []
