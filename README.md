@@ -1,4 +1,4 @@
-# prompt-bar
+# ClauDiscombobulating
 
 Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by app.
 
@@ -21,13 +21,13 @@ Needs the `claude` CLI. One line, nothing to clone.
 **Windows** (PowerShell):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.ps1)))
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Niedvin/ClauDiscombobulating/main/install.ps1)))
 ```
 
 **macOS / Linux**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Niedvin/ClauDiscombobulating/main/install.sh | bash
 ```
 
 Restart Claude Code and the desktop app.
@@ -43,8 +43,8 @@ Restart Claude Code and the desktop app.
 By hand (no auto-update):
 
 ```
-claude plugin marketplace add Niedvin/prompt-bar
-claude plugin install prompt-bar@prompt-bar --scope user
+claude plugin marketplace add Niedvin/ClauDiscombobulating
+claude plugin install ClauDiscombobulating@ClauDiscombobulating --scope user
 ```
 
 Updates are pulled only when `version` in `plugin/.claude-plugin/plugin.json` goes up.
@@ -52,11 +52,11 @@ Updates are pulled only when `version` in `plugin/.claude-plugin/plugin.json` go
 ## Uninstall
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.ps1))) -Uninstall
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Niedvin/ClauDiscombobulating/main/install.ps1))) -Uninstall
 ```
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Niedvin/prompt-bar/main/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/Niedvin/ClauDiscombobulating/main/install.sh | bash -s -- --uninstall
 ```
 
 ## Dev

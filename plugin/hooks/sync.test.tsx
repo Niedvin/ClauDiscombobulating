@@ -17,16 +17,16 @@ test('terminal pane: cards draw with saved effort', { timeoutMs: 20000 }, async 
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const band = await $.ui.mount({
-    plugin: 'prompt-bar',
+    plugin: 'ClauDiscombobulating',
     surface: 'terminal',
     component: 'Pane',
-    requestId: 'prompt-bar',
+    requestId: 'ClauDiscombobulating',
     props: { title: 't', isFocused: false, bodyColumns: 24, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
   })
   const s = JSON.stringify(await band.drawn())
   expect(s).toContain('Opus 5.5')
   expect(s).toContain('"low"')
-  const mode = await $.ui.mount({ plugin: 'prompt-bar', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const mode = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
   expect(JSON.stringify(await mode.drawn())).toContain('━━━━━━━━━')
 })
 
@@ -46,8 +46,8 @@ test(`cache timer on ${surface}: 55 down to 0, terminal hides first 5 min`, { ti
   await $.session.start({ cwd: '/', surface, isInteractive: true })
   const mode = await $.ui.mount(
     surface === 'desktop'
-      ? { plugin: 'prompt-bar', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 20 }, view: {} } }
-      : { plugin: 'prompt-bar', surface, component: 'SessionMode', props: { modes: [] } },
+      ? { plugin: 'ClauDiscombobulating', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 20 }, view: {} } }
+      : { plugin: 'ClauDiscombobulating', surface, component: 'SessionMode', props: { modes: [] } },
   )
   const text = async () => JSON.stringify(await mode.drawn())
   expect(await text()).not.toContain('кеш')

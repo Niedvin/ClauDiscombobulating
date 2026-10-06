@@ -1,4 +1,4 @@
-# prompt-bar
+# ClauDiscombobulating
 
 Claude Code mod. One plugin, mode by surface:
 
@@ -11,7 +11,7 @@ Switch: `isFull` (set by `enableFull`). Desktop app runs the CLI headless: `sess
 
 - `install.sh` — macOS/Linux installer, GitHub copy only (`curl … | bash`, `--uninstall`). Same auto-update write as `install.ps1`.
 - `install.ps1` — installer. `.\install.ps1` / `-Uninstall` / `-WhatIf`. User scope, covers console + desktop.
-- `.claude-plugin/marketplace.json` — marketplace `prompt-bar`, plugin at `./plugin`. Repo: github.com/Niedvin/prompt-bar (public).
+- `.claude-plugin/marketplace.json` — marketplace `ClauDiscombobulating`, plugin at `./plugin`. Repo: github.com/Niedvin/ClauDiscombobulating (public).
 - `plugin/.claude-plugin/plugin.json` — manifest. Bump version on every release (auto-update keys on it).
 - `plugin/assets/cache-alert.mp3` — alert sound. Original `cache alert.mp3` in root is git-ignored.
 - `plugin/hooks/register.tsx` — whole mod. `hooks.json` points to it.
@@ -22,7 +22,7 @@ Switch: `isFull` (set by `enableFull`). Desktop app runs the CLI headless: `sess
 ## Dev loop
 
 - Edit here (not under `~/.claude`: protected path, bypass mode does not cover it).
-- Hot reload: copy `plugin/hooks`, `plugin.json` to `~/.claude/dev-mods/<session-id>/prompt-bar/`.
+- Hot reload: copy `plugin/hooks`, `plugin.json` to `~/.claude/dev-mods/<session-id>/ClauDiscombobulating/`.
 - Ship: `.\install.ps1` (reinstalls), restart apps.
 - Test installer without touching real config: set `CLAUDE_CONFIG_DIR` to a temp dir first.
 
@@ -42,8 +42,8 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 
 ## Runtime files
 
-- `~/.claude/mods/prompt-bar-limits.json` — limits shared between sessions.
-- `~/.claude/mods/prompt-bar-debug.log` — event log (console only).
+- `~/.claude/mods/ClauDiscombobulating-limits.json` — limits shared between sessions.
+- `~/.claude/mods/ClauDiscombobulating-debug.log` — event log (console only).
 
 ## Gotchas
 
@@ -60,6 +60,6 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 
 ## Auto-update from GitHub
 
-Published as marketplace `prompt-bar` (repo root has `.claude-plugin/marketplace.json`). Users: `.\install.ps1 -Repo Niedvin/prompt-bar` — also writes `extraKnownMarketplaces.prompt-bar` (github source, `autoUpdate: true`) into `settings.json` (backup in `.backups/`); `-Uninstall` removes it. Local install leaves settings alone.
+Published as marketplace `ClauDiscombobulating` (repo root has `.claude-plugin/marketplace.json`). Users: `.\install.ps1 -Repo Niedvin/ClauDiscombobulating` — also writes `extraKnownMarketplaces.ClauDiscombobulating` (github source, `autoUpdate: true`) into `settings.json` (backup in `.backups/`); `-Uninstall` removes it. Local install leaves settings alone.
 
 Release: bump `version` in `plugin.json`, commit, push. Installed copies pull it.

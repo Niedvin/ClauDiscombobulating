@@ -19,8 +19,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.advance(1500)
     const mode = await $.ui.mount(
       surface === 'desktop'
-        ? { plugin: 'prompt-bar', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 20 }, view: {} } }
-        : { plugin: 'prompt-bar', surface, component: 'SessionMode', props: { modes: [] } },
+        ? { plugin: 'ClauDiscombobulating', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 20 }, view: {} } }
+        : { plugin: 'ClauDiscombobulating', surface, component: 'SessionMode', props: { modes: [] } },
     )
     expect(JSON.stringify(await mode.drawn())).toContain('кеш 20хв')
   })

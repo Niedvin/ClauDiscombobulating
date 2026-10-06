@@ -30,7 +30,7 @@ async function boot($: any, on: any, answer: string) {
     return { result: { questions: e.questions, answers: { [q]: answer } } }
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const pane = await $.ui.mount({ plugin: 'prompt-bar', surface: 'terminal', component: 'Pane', requestId: 'prompt-bar', props: PANE })
+  const pane = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'terminal', component: 'Pane', requestId: 'ClauDiscombobulating', props: PANE })
   return { sent, asked, ran, pane }
 }
 

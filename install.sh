@@ -2,9 +2,9 @@
 # macOS/Linux installer, usage in README — 2026-10-06
 set -euo pipefail
 
-REPO="${PROMPT_BAR_REPO:-Niedvin/prompt-bar}"
-MARKET="prompt-bar"
-PLUGIN="prompt-bar@$MARKET"
+REPO="${PROMPT_BAR_REPO:-Niedvin/ClauDiscombobulating}"
+MARKET="ClauDiscombobulating"
+PLUGIN="ClauDiscombobulating@$MARKET"
 CONFIG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SETTINGS="$CONFIG/settings.json"
 
@@ -66,16 +66,21 @@ JS
   fi
 }
 
-claude plugin uninstall "$PLUGIN" --scope user >/dev/null 2>&1 || true
-claude plugin marketplace remove "$MARKET" >/dev/null 2>&1 || true
+# the mod was called prompt-bar before the rename — 2026-10-06
+for old in "$PLUGIN" prompt-bar@prompt-bar prompt-bar@prompt-bar-local; do
+  claude plugin uninstall "$old" --scope user >/dev/null 2>&1 || true
+done
+for old in "$MARKET" prompt-bar prompt-bar-local; do
+  claude plugin marketplace remove "$old" >/dev/null 2>&1 || true
+done
 
 if [ "${1:-}" = "--uninstall" ]; then
   set_autoupdate 0
-  echo "prompt-bar removed."
+  echo "ClauDiscombobulating removed."
   exit 0
 fi
 
 claude plugin marketplace add "$REPO"
 claude plugin install "$PLUGIN" --scope user
 set_autoupdate 1
-echo "prompt-bar installed. Restart Claude Code and the desktop app."
+echo "ClauDiscombobulating installed. Restart Claude Code and the desktop app."

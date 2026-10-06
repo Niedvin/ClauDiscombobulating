@@ -43,7 +43,7 @@ test('desktop app (start surface null, then attach): only limits and cache', { t
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.advance(6 * 60000)
 
-  const band = await $.ui.mount({ plugin: 'prompt-bar', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  const band = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'desktop', component: 'AbovePrompt', props: BAND })
   const s = JSON.stringify(await band.drawn())
   expect(s).toContain('кеш 54хв')
   expect(s).toContain('5г')
@@ -52,7 +52,7 @@ test('desktop app (start surface null, then attach): only limits and cache', { t
   expect(s).toContain('↻')
   expect(s).not.toContain('Opus')
 
-  const mode = await $.ui.mount({ plugin: 'prompt-bar', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+  const mode = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   expect(JSON.stringify(await mode.drawn())).toContain('FOOTER')
   expect(calls).toEqual([])
 })
@@ -70,7 +70,7 @@ test('desktop compact button: effort low, compact, effort back', { timeoutMs: 20
   })
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await clock.advance(1100)
-  const band = await $.ui.mount({ plugin: 'prompt-bar', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  const band = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'desktop', component: 'AbovePrompt', props: BAND })
   await band.press({ key: 'compact' })
   expect(ran).toEqual(['effort low', 'compact', 'effort xhigh'])
 })

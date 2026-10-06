@@ -13,7 +13,7 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const EFFORT_COLORS = ['#4f9cf0', '#3fbf8f', '#3fbf8f', '#3fbf8f', '#ef5b5b']
 const APPLY_MS = 700
 const UNREAD = '?'
-const PANE = 'prompt-bar'
+const PANE = 'ClauDiscombobulating'
 const PANE_COLS = 24
 const STACK_ROWS = 21
 const CARDS_ROWS = 7 + 1 + STACK_ROWS
@@ -26,25 +26,25 @@ const CACHE_TTL_MS = 3600000
 const CACHE_SHOW_BELOW = 55
 const ALERT_MIN = 10
 const AUTO_COMPACT_AT = 99
-const ALERT_TITLE = 'prompt-bar'
+const ALERT_TITLE = 'ClauDiscombobulating'
 const ALERT_BODY = 'Кеш: лишилось 10 хв'
 // no double quotes: argv reaches powershell.exe as one command line — 2026-10-06
 const ALERT_PS = `$ErrorActionPreference='Stop';Add-Type -AssemblyName PresentationCore;$p=New-Object System.Windows.Media.MediaPlayer;$p.Open([uri]$env:PB_SOUND);$p.Play();[void][Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime];[void][Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime];$x=New-Object Windows.Data.Xml.Dom.XmlDocument;$x.LoadXml('<toast><visual><binding template=''ToastGeneric''><text>'+$env:PB_TITLE+'</text><text>'+$env:PB_BODY+'</text></binding></visual><audio silent=''true''/></toast>');[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x));Start-Sleep -Seconds 5`
 
-const limits = atom({ plugin: 'prompt-bar', key: 'limits' } as const, [] as Limit[])
-const live = atom({ plugin: 'prompt-bar', key: 'live' } as const, { model: '', effort: '' } as Live)
-const pending = atom({ plugin: 'prompt-bar', key: 'pending' } as const, { model: '', effort: '' } as Pending)
-const flag = atom({ plugin: 'prompt-bar', key: 'flag' } as const, UNREAD)
-const paneUp = atom({ plugin: 'prompt-bar', key: 'paneUp' } as const, false)
-const timer = atom({ plugin: 'prompt-bar', key: 'timer' } as const, { at: 0, text: DEFAULT_TEXT } as Alarm)
-const draft = atom({ plugin: 'prompt-bar', key: 'draft' } as const, { h: 0, m: 0, isSet: false } as Draft)
-const showResetAt = atom({ plugin: 'prompt-bar', key: 'showResetAt' } as const, false)
-const cacheLeft = atom({ plugin: 'prompt-bar', key: 'cacheLeft' } as const, -1)
-const activeAt = atom({ plugin: 'prompt-bar', key: 'activeAt' } as const, 0)
-const alerted = atom({ plugin: 'prompt-bar', key: 'alerted' } as const, 0)
+const limits = atom({ plugin: 'ClauDiscombobulating', key: 'limits' } as const, [] as Limit[])
+const live = atom({ plugin: 'ClauDiscombobulating', key: 'live' } as const, { model: '', effort: '' } as Live)
+const pending = atom({ plugin: 'ClauDiscombobulating', key: 'pending' } as const, { model: '', effort: '' } as Pending)
+const flag = atom({ plugin: 'ClauDiscombobulating', key: 'flag' } as const, UNREAD)
+const paneUp = atom({ plugin: 'ClauDiscombobulating', key: 'paneUp' } as const, false)
+const timer = atom({ plugin: 'ClauDiscombobulating', key: 'timer' } as const, { at: 0, text: DEFAULT_TEXT } as Alarm)
+const draft = atom({ plugin: 'ClauDiscombobulating', key: 'draft' } as const, { h: 0, m: 0, isSet: false } as Draft)
+const showResetAt = atom({ plugin: 'ClauDiscombobulating', key: 'showResetAt' } as const, false)
+const cacheLeft = atom({ plugin: 'ClauDiscombobulating', key: 'cacheLeft' } as const, -1)
+const activeAt = atom({ plugin: 'ClauDiscombobulating', key: 'activeAt' } as const, 0)
+const alerted = atom({ plugin: 'ClauDiscombobulating', key: 'alerted' } as const, 0)
 // persisted per 5h window so a reload at 99% does not compact twice — 2026-10-06
-const compactedFor = atom({ plugin: 'prompt-bar', key: 'compactedFor' } as const, '')
-const log = atom({ plugin: 'prompt-bar', key: 'log' } as const, [] as string[])
+const compactedFor = atom({ plugin: 'ClauDiscombobulating', key: 'compactedFor' } as const, '')
+const log = atom({ plugin: 'ClauDiscombobulating', key: 'log' } as const, [] as string[])
 
 const modelIndex = (id: string) => MODELS.findIndex(m => id.toLowerCase().includes(m.family))
 const labels: Record<string, string> = {}
@@ -79,14 +79,14 @@ async function note($: EngineInterface, line: string) {
   await update($, log, l => [...l.slice(-29), `${t} ${line}`])
   try {
     const home = await homeDir($)
-    if (home) await $.fs.write(`${home}/.claude/mods/prompt-bar-debug.log`, (await read($, log)).join(String.fromCharCode(10)))
+    if (home) await $.fs.write(`${home}/.claude/mods/ClauDiscombobulating-debug.log`, (await read($, log)).join(String.fromCharCode(10)))
   } catch {}
 }
 
 type SavedSettings = { effortLevel?: unknown; modelSettings?: Record<string, { effortLevel?: unknown }> }
 
 async function openPane($: EngineInterface, why: string) {
-  const r = await $.ui.open({ id: PANE, title: 'prompt-bar', columns: PANE_COLS })
+  const r = await $.ui.open({ id: PANE, title: 'ClauDiscombobulating', columns: PANE_COLS })
   await note($, `open pane (${why}) → ${JSON.stringify(r)}`)
 }
 
@@ -321,7 +321,7 @@ type Shared = { at: number; limits: Limit[] }
 // each session hears only its own API replies; the store carries the freshest to the rest — 2026-10-02
 async function sharedPath($: EngineInterface) {
   const home = await homeDir($)
-  return home ? `${home}/.claude/mods/prompt-bar-limits.json` : undefined
+  return home ? `${home}/.claude/mods/ClauDiscombobulating-limits.json` : undefined
 }
 
 async function shareLimits($: EngineInterface, ls: Limit[]) {
@@ -354,10 +354,10 @@ async function applyModel($: EngineInterface) {
     try {
       const r = await $.command.run({ command: 'model', args: p.model })
       const text = r.text ?? ''
-      if (!/Set model to|Kept model as/.test(text)) $.ui.toast(text.slice(0, 160) || `prompt-bar: /model ${p.model} failed`)
+      if (!/Set model to|Kept model as/.test(text)) $.ui.toast(text.slice(0, 160) || `ClauDiscombobulating: /model ${p.model} failed`)
       await note($, `/model ${p.model} → ${text.slice(0, 90)}`)
     } catch (err) {
-      $.ui.toast(`prompt-bar: /model ${p.model} failed`)
+      $.ui.toast(`ClauDiscombobulating: /model ${p.model} failed`)
       await note($, `/model failed ${String(err)}`)
     }
     const model = await $.session.model()
@@ -382,7 +382,7 @@ async function applyEffort($: EngineInterface) {
       else $.ui.toast(text.slice(0, 160))
       await note($, `/effort ${p.effort} → ${text.slice(0, 90)}`)
     } catch (err) {
-      $.ui.toast(`prompt-bar: /effort ${p.effort} failed`)
+      $.ui.toast(`ClauDiscombobulating: /effort ${p.effort} failed`)
       await note($, `/effort failed ${String(err)}`)
     }
   }
@@ -438,7 +438,7 @@ async function enableFull($: EngineInterface, why: string) {
   if (isFull) return
   isFull = true
   isTerminal = true
-  await $.command.register({ name: 'prompt-bar', description: 'Open the model and effort pane' })
+  await $.command.register({ name: 'ClauDiscombobulating', description: 'Open the model and effort pane' })
   await openPane($, why)
   for (const m of MODELS) {
     const v = await $.store.get(`label:${m.family}`).catch(() => undefined)
@@ -447,7 +447,7 @@ async function enableFull($: EngineInterface, why: string) {
   await poll($)
   await $.tool.register({
     name: 'probe',
-    description: 'prompt-bar diagnostics: model and effort as the engine and the app hold them, render metrics, recent events.',
+    description: 'ClauDiscombobulating diagnostics: model and effort as the engine and the app hold them, render metrics, recent events.',
     inputSchema: { type: 'object', properties: {} },
   })
 }
@@ -525,7 +525,7 @@ export const register: Register = on => {
   on('command.run', { command: 'effort' }, onCommand)
   on('command.run', { command: 'model' }, onCommand)
 
-  on('tool.call', { tool: 'mcp__prompt-bar__probe' }, async $ => {
+  on('tool.call', { tool: 'mcp__ClauDiscombobulating__probe' }, async $ => {
     const merged = (await $.settings.read()) as { effortLevel?: unknown; model?: unknown }
     const fromApp = (await $.settings.read({ source: 'flag' })) as { effortLevel?: unknown; model?: unknown }
     const commands = (await $.command.list()).map(c => c.name).filter(n => /^(model|effort)$/.test(n))
@@ -630,8 +630,8 @@ export const register: Register = on => {
     )
   })
 
-  on('command.run', { command: 'prompt-bar' }, async $ => {
-    const opened = await $.ui.open({ id: PANE, title: 'prompt-bar', columns: PANE_COLS })
+  on('command.run', { command: 'ClauDiscombobulating' }, async $ => {
+    const opened = await $.ui.open({ id: PANE, title: 'ClauDiscombobulating', columns: PANE_COLS })
     return { text: opened.isPlaced ? 'Панель відкрита.' : 'Панель чекає на ширший термінал.' }
   })
 
