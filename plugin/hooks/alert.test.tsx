@@ -9,7 +9,7 @@ test('cache alert: one toast + sound script per idle period, 10 min before miss'
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('ui.toast', () => ({ value: undefined }))
-  on('env.get', (_$, e) => ({ value: e.name === 'OS' ? 'Windows_NT' : undefined }))
+  on('env.get', (_$, e) => ({ value: e.name === 'OS' ? 'Windows_NT' : e.name === 'CLAUDISCOMBOBULATING_LANG' ? 'uk' : undefined }))
   on('process.run', (_$, e) => {
     runs.push({ argv: e.argv, env: e.init?.env })
     return { value: { exitCode: 0, stdout: '', stderr: '' } }

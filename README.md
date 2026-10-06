@@ -7,12 +7,16 @@ Mod for Claude Code (console + Claude desktop). One plugin, mode picks itself by
 | Usage limits (5h, 7d) | footer | band above prompt |
 | Cache timer | footer (after 5 min idle) | band above prompt (always) |
 | Cache alert (toast + sound, 10 min before miss) | yes | yes |
+| Auto compact at 99% of the 5h limit | yes | yes |
 | Model / effort pickers | above prompt | - |
 | Side pane: message timer, Sessions, Resume, Compact, model, effort | yes | - |
 
+- **Auto compact:** when the 5h limit reaches 99%, a running turn is stopped and `/compact` runs, once per 5h window. Better a controlled compact now than the work dying on its own and re-reading the whole context after the reset. It does not resume the work afterwards. The limit is checked every 5 min below 75%, every minute from 75%, every 30 s from 90%, every second from 95%.
 - **Sessions** opens `/resume`. **Resume** sends `--resume` (console) and asks first when cache is already missed.
 - **Compact** on cache miss: switches to Sonnet low, compacts, restores model + effort.
-- Cache alert sound: `plugin/assets/cache-alert.mp3`. Toast + sound are Windows only; other systems get the in-app toast.
+- **Language:** Ukrainian when the system language is Ukrainian, English otherwise (`d`, `h`, `m`, `send`, `cancel`, …). Force it with env `CLAUDISCOMBOBULATING_LANG=uk` or `en`.
+- **Limits shared between sessions:** every session shows the freshest limits, not only after its own first reply. Works on Windows, macOS and Linux.
+- Cache alert sound: `plugin/assets/cache-alert.mp3`, installed with the plugin. Toast + sound are Windows only; other systems get the in-app toast.
 
 ## Install
 
@@ -30,15 +34,18 @@ Needs the `claude` CLI. One line, nothing to clone.
 curl -fsSL https://raw.githubusercontent.com/Niedvin/ClauDiscombobulating/main/install.sh | bash
 ```
 
-Restart Claude Code and the desktop app.
+Restart Claude Code and the desktop app. One install serves both the console and the desktop app.
 
 ### Why the script and not the two manual commands
 
-- **Auto-update is on from the start.** The script writes the `autoUpdate` entry into `settings.json` for you. With the manual commands the mod never updates, until you edit that file by hand.
-- **Safe reinstall.** An old copy is removed first, so rerunning the line repairs a broken install or switches an old one to the GitHub copy.
-- **Your settings stay.** Only one key is touched. `settings.json` is copied to `.backups/` before each change.
+- **Auto-update is on from the start.** The script writes the `autoUpdate` entry into `settings.json` for you. With the manual commands the mod never updates, until you edit that file by hand. A new release reaches you when its `version` goes up, nothing to run.
+- **Install and update are the same line.** An old copy is removed first, so rerunning it updates right now, repairs a broken install, or moves an old one to the GitHub copy.
+- **Moves you off the old name.** An install made under the previous name `prompt-bar` is found and removed, so you do not end up with two copies.
+- **Your settings stay.** Only the one `extraKnownMarketplaces` key is touched, and `settings.json` is copied to `.backups/` first (the copy is checked to be non-empty). The file is replaced in one step, never half-written.
 - **One line to undo.** The same script with `-Uninstall` (Windows) or `--uninstall` (macOS / Linux) removes the plugin, the marketplace and the auto-update entry.
-- **Same result on every system.** One source of truth, no copy-pasting JSON.
+- **Same result on every system.** One source of truth, no copy-pasting JSON, no editing a file by hand on Windows and a different one on Mac.
+- **Readable.** Both scripts are short and sit in this repo: [install.ps1](install.ps1), [install.sh](install.sh). Read before you run.
+- **Your own fork.** `-Repo owner/name` (Windows) or env `CLAUDISCOMBOBULATING_REPO=owner/name` (macOS / Linux) installs and auto-updates from a fork instead.
 
 By hand (no auto-update):
 

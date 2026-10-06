@@ -13,6 +13,7 @@ test('desktop app (start surface null, then attach): only limits and cache', { t
       { kind: 'seven_day', percentUsed: 74 },
     ],
   } }))
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'CLAUDISCOMBOBULATING_LANG' ? 'uk' : undefined }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.attach', (_$, e) => ({ clientId: e.clientId }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
@@ -61,6 +62,7 @@ test('desktop compact button: effort low, compact, effort back', { timeoutMs: 20
   const clock = mock.clock(on, { now: 1_000_000 })
   const ran: string[] = []
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: 8 }] } }))
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'CLAUDISCOMBOBULATING_LANG' ? 'uk' : undefined }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('settings.read', () => ({ value: { effortLevel: 'xhigh' } }))

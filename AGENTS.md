@@ -56,7 +56,7 @@ Timer pinned top (rows 0..6). Bottom stack anchored down, order: Sessions, Resum
 
 - Back up before overwriting user-authored files (`~/.claude/.backups/`).
 - Comments: one line, dated ` — YYYY-MM-DD`, only non-obvious why.
-- UI text Ukrainian, code + comments English.
+- UI text: `UK` and `EN` dictionaries in `register.tsx`, picked once at `session.start` (`detectUk`). Ukrainian only if the system language is Ukrainian, else English. New UI string → add to both.
 
 ## Auto-update from GitHub
 

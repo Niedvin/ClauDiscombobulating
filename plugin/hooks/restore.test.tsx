@@ -11,7 +11,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('ui.panes', () => ({ value: [] }))
     on('ui.toast', () => ({ value: undefined }))
-    on('env.get', () => ({ value: undefined }))
+    on('env.get', (_$: any, e: any) => ({ value: e.name === 'CLAUDISCOMBOBULATING_LANG' ? 'uk' : undefined }))
     on('session.start', (_$, e) => ({ cwd: e.cwd }))
     on('classic.SessionStart', () => ({}))
     await $.session.start({ cwd: '/', surface, isInteractive: true })

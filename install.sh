@@ -2,7 +2,7 @@
 # macOS/Linux installer, usage in README — 2026-10-06
 set -euo pipefail
 
-REPO="${PROMPT_BAR_REPO:-Niedvin/ClauDiscombobulating}"
+REPO="${CLAUDISCOMBOBULATING_REPO:-Niedvin/ClauDiscombobulating}"
 MARKET="ClauDiscombobulating"
 PLUGIN="ClauDiscombobulating@$MARKET"
 CONFIG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"

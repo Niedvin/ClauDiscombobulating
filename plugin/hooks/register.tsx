@@ -17,26 +17,75 @@ const PANE = 'ClauDiscombobulating'
 const PANE_COLS = 24
 const STACK_ROWS = 21
 const CARDS_ROWS = 7 + 1 + STACK_ROWS
-const DEFAULT_TEXT = 'продовжуй'
 const RESUME_TERMINAL = '--resume'
 const RESUME_OTHER = 'continue'
-const CONTINUE = 'Продовжити'
 const WHEEL_GAP_MS = 150
 const CACHE_TTL_MS = 3600000
 const CACHE_SHOW_BELOW = 55
 const ALERT_MIN = 10
 const AUTO_COMPACT_AT = 99
 const ALERT_TITLE = 'ClauDiscombobulating'
-const ALERT_BODY = 'Кеш: лишилось 10 хв'
 // no double quotes: argv reaches powershell.exe as one command line — 2026-10-06
 const ALERT_PS = `$ErrorActionPreference='Stop';Add-Type -AssemblyName PresentationCore;$p=New-Object System.Windows.Media.MediaPlayer;$p.Open([uri]$env:PB_SOUND);$p.Play();[void][Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime];[void][Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime];$x=New-Object Windows.Data.Xml.Dom.XmlDocument;$x.LoadXml('<toast><visual><binding template=''ToastGeneric''><text>'+$env:PB_TITLE+'</text><text>'+$env:PB_BODY+'</text></binding></visual><audio silent=''true''/></toast>');[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x));Start-Sleep -Seconds 5`
+
+const UK = {
+  defaultText: 'продовжуй',
+  yes: 'Продовжити',
+  no: 'Скасувати',
+  hour: 'г',
+  min: 'хв',
+  day: 'д',
+  cache: 'кеш',
+  at: 'о',
+  via: 'через',
+  alertBody: 'Кеш: лишилось 10 хв',
+  armed: (t: string) => `Повідомлення піде о ${t}`,
+  compactOnSonnet: 'Cache miss: compact на Sonnet low',
+  compactFailed: 'Compact не вдався',
+  autoCompact: (p: number) => `Ліміт 5г ${p}%: стоп і compact`,
+  resumeFailed: 'Не вдалося відкрити /resume',
+  resumeAsk: 'Cache miss: контекст кешується заново і це коштує. Все одно продовжити?',
+  noEffort: 'Haiku не має effort',
+  toPane: 'колесо ⇥',
+  paneOpen: 'Панель відкрита.',
+  paneWaits: 'Панель чекає на ширший термінал.',
+  placeholder: 'текст повідомлення',
+  cancelBtn: '✕  скасувати',
+  sendBtn: '✓  відправити',
+}
+const EN: typeof UK = {
+  defaultText: 'continue',
+  yes: 'Continue',
+  no: 'Cancel',
+  hour: 'h',
+  min: 'm',
+  day: 'd',
+  cache: 'cache',
+  at: 'at',
+  via: 'in',
+  alertBody: 'Cache: 10 min left',
+  armed: t => `Message will be sent at ${t}`,
+  compactOnSonnet: 'Cache miss: compacting on Sonnet low',
+  compactFailed: 'Compact failed',
+  autoCompact: p => `5h limit ${p}%: stopping to compact`,
+  resumeFailed: 'Could not open /resume',
+  resumeAsk: 'Cache miss: the context is cached again, which costs tokens. Continue anyway?',
+  noEffort: 'Haiku has no effort',
+  toPane: 'wheel ⇥',
+  paneOpen: 'Pane opened.',
+  paneWaits: 'Pane waits for a wider terminal.',
+  placeholder: 'message text',
+  cancelBtn: '✕  cancel',
+  sendBtn: '✓  send',
+}
+let tr = EN
 
 const limits = atom({ plugin: 'ClauDiscombobulating', key: 'limits' } as const, [] as Limit[])
 const live = atom({ plugin: 'ClauDiscombobulating', key: 'live' } as const, { model: '', effort: '' } as Live)
 const pending = atom({ plugin: 'ClauDiscombobulating', key: 'pending' } as const, { model: '', effort: '' } as Pending)
 const flag = atom({ plugin: 'ClauDiscombobulating', key: 'flag' } as const, UNREAD)
 const paneUp = atom({ plugin: 'ClauDiscombobulating', key: 'paneUp' } as const, false)
-const timer = atom({ plugin: 'ClauDiscombobulating', key: 'timer' } as const, { at: 0, text: DEFAULT_TEXT } as Alarm)
+const timer = atom({ plugin: 'ClauDiscombobulating', key: 'timer' } as const, { at: 0, text: UK.defaultText } as Alarm)
 const draft = atom({ plugin: 'ClauDiscombobulating', key: 'draft' } as const, { h: 0, m: 0, isSet: false } as Draft)
 const showResetAt = atom({ plugin: 'ClauDiscombobulating', key: 'showResetAt' } as const, false)
 const cacheLeft = atom({ plugin: 'ClauDiscombobulating', key: 'cacheLeft' } as const, -1)
@@ -62,13 +111,13 @@ const isLevel = (v: unknown): v is string => typeof v === 'string' && EFFORTS.in
 const within = (row: number, [a, b]: number[]) => row >= a && row <= b
 const wrap = (i: number, n: number) => ((i % n) + n) % n
 const tone = (p: number) => (p >= 90 ? '#ef5b5b' : p >= 70 ? '#f0b429' : '#3fbf8f')
-const shortNames: Record<string, string> = { five_hour: '5г', seven_day: '7д', spend_limit: '$' }
+const shortName = (kind: string) => ({ five_hour: `5${tr.hour}`, seven_day: `7${tr.day}`, spend_limit: '$' })[kind as 'five_hour'] ?? kind
 
 function resetIn(iso?: string, now = Date.now()) {
   if (!iso) return ''
   const m = Math.max(0, Math.round((Date.parse(iso) - now) / 60000))
-  if (m >= 1440) return `${Math.floor(m / 1440)}д ${Math.floor((m % 1440) / 60)}г`
-  return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`
+  if (m >= 1440) return `${Math.floor(m / 1440)}${tr.day} ${Math.floor((m % 1440) / 60)}${tr.hour}`
+  return m >= 60 ? `${Math.floor(m / 60)}${tr.hour} ${m % 60}${tr.min}` : `${m}${tr.min}`
 }
 
 // USERPROFILE is Windows-only, HOME covers macOS/Linux — 2026-10-06
@@ -100,7 +149,7 @@ async function savedEffort($: EngineInterface, model: string) {
 
 const two = (n: number) => String(n).padStart(2, '0')
 
-const cacheText = (min: number) => (min <= 0 ? '⚠ Cache Miss' : `кеш ${min}хв`)
+const cacheText = (min: number) => (min <= 0 ? '⚠ Cache Miss' : `${tr.cache} ${min}${tr.min}`)
 const cacheColor = (min: number) => (min <= 5 ? '#ef5b5b' : min <= 15 ? '#f0b429' : '#3fbf8f')
 
 // minutes until the 1h prompt cache lapses; -1 while a turn runs or before any turn — 2026-10-06
@@ -109,14 +158,39 @@ function cacheMinutes(now: number) {
   return Math.max(0, Math.ceil((CACHE_TTL_MS - (now - lastActive)) / 60000))
 }
 
+const UK_TAG = /^uk(?![a-z])/i
+const firstTag = (out: string) => /[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)?/.exec(out)?.[0] ?? ''
+
+// LANG is set by Git Bash on Windows, so there the display language wins; unknown → English — 2026-10-06
+async function detectUk($: EngineInterface) {
+  const none = () => undefined
+  const forced = await $.env.get('CLAUDISCOMBOBULATING_LANG').catch(none)
+  if (forced) return UK_TAG.test(forced)
+  const isWin = (await $.env.get('OS').catch(none)) === 'Windows_NT'
+  if (!isWin) {
+    const vars = [await $.env.get('LC_ALL').catch(none), await $.env.get('LC_MESSAGES').catch(none), await $.env.get('LANGUAGE').catch(none), await $.env.get('LANG').catch(none)]
+    const set = vars.find(v => v && v !== 'C' && v !== 'POSIX')
+    if (set) return UK_TAG.test(set)
+  }
+  const argv = isWin ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', '(Get-UICulture).Name'] : ['defaults', 'read', '-g', 'AppleLanguages']
+  const r = await $.process.run(argv, { timeoutMs: 5000 }).catch(() => undefined)
+  return UK_TAG.test(firstTag(r?.stdout ?? ''))
+}
+
+async function applyLang($: EngineInterface) {
+  tr = (await detectUk($)) ? UK : EN
+  const isDefault = (x: string) => x === UK.defaultText || x === EN.defaultText
+  await update($, timer, t => (isDefault(t.text) && t.text !== tr.defaultText ? { ...t, text: tr.defaultText } : t))
+}
+
 // the terminal footer hides the timer for the first 5 min idle, the desktop footer shows it always — 2026-10-06
 const showsCache = (min: number, surface: string) => min >= 0 && (surface === 'desktop' || min <= CACHE_SHOW_BELOW)
 
 async function alertCache($: EngineInterface) {
-  $.ui.toast(ALERT_BODY)
+  $.ui.toast(tr.alertBody)
   if ((await $.env.get('OS').catch(() => undefined)) !== 'Windows_NT') return
   const sound = encodeURI(`file:///${$.plugin.root.replace(/\\/g, '/')}/assets/cache-alert.mp3`)
-  const env = { PB_SOUND: sound, PB_TITLE: ALERT_TITLE, PB_BODY: ALERT_BODY }
+  const env = { PB_SOUND: sound, PB_TITLE: ALERT_TITLE, PB_BODY: tr.alertBody }
   const argv = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ALERT_PS]
   await $.process.run(argv, { env, timeoutMs: 20000 }).catch(err => note($, `alert failed ${String(err)}`))
 }
@@ -136,7 +210,7 @@ function nextAt(h: number, m: number, now: number) {
 
 function inFor(ms: number) {
   const m = Math.max(0, Math.round(ms / 60000))
-  return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`
+  return m >= 60 ? `${Math.floor(m / 60)}${tr.hour} ${m % 60}${tr.min}` : `${m}${tr.min}`
 }
 
 async function shownDraft($: EngineInterface): Promise<Draft> {
@@ -159,7 +233,7 @@ async function armTimer($: EngineInterface) {
   const at = nextAt(d.h, d.m, Date.now())
   await update($, timer, t => ({ ...t, at }))
   await note($, `timer armed for ${new Date(at).toString()}`)
-  $.ui.toast(`Повідомлення піде о ${two(d.h)}:${two(d.m)}`)
+  $.ui.toast(tr.armed(`${two(d.h)}:${two(d.m)}`))
 }
 
 async function fireTimer($: EngineInterface) {
@@ -168,7 +242,7 @@ async function fireTimer($: EngineInterface) {
   await update($, timer, x => ({ ...x, at: 0 }))
   await update($, draft, x => ({ ...x, isSet: false }))
   await note($, `timer fired: ${t.text}`)
-  await $.prompt.submit({ text: t.text || DEFAULT_TEXT, asUser: true })
+  await $.prompt.submit({ text: t.text || tr.defaultText, asUser: true })
 }
 
 async function compact($: EngineInterface) {
@@ -181,14 +255,14 @@ async function compact($: EngineInterface) {
   const isSwitch = isMiss && fam?.family !== 'sonnet'
   try {
     if (isSwitch) {
-      $.ui.toast('Cache miss: compact на Sonnet low')
+      $.ui.toast(tr.compactOnSonnet)
       await $.command.run({ command: 'model', args: 'sonnet' })
     }
     // a model switch makes the app re-send its own effort, so low is set after it — 2026-10-06
     if (isSwitch || effort !== 'low') await $.command.run({ command: 'effort', args: 'low' })
     await $.command.run({ command: 'compact' })
   } catch (err) {
-    $.ui.toast('Compact не вдався')
+    $.ui.toast(tr.compactFailed)
     await note($, `compact failed ${String(err)}`)
   } finally {
     if (isSwitch) {
@@ -216,7 +290,7 @@ async function autoCompact($: EngineInterface) {
   isCompacting = true
   await update($, compactedFor, () => key)
   try {
-    $.ui.toast(`Ліміт 5г ${Math.floor(five.percentUsed)}%: стоп і compact`)
+    $.ui.toast(tr.autoCompact(Math.floor(five.percentUsed)))
     if (isBusy && turnId) {
       await $.turn.abort({ turnId }).catch(err => note($, `auto abort failed ${String(err)}`))
       isBusy = false
@@ -232,7 +306,7 @@ async function sessions($: EngineInterface) {
   try {
     await $.command.run({ command: 'resume' })
   } catch (err) {
-    $.ui.toast('Не вдалося відкрити /resume')
+    $.ui.toast(tr.resumeFailed)
     await note($, `sessions failed ${String(err)}`)
   }
 }
@@ -241,9 +315,9 @@ async function resume($: EngineInterface, surface: string) {
   const text = surface === 'terminal' ? RESUME_TERMINAL : RESUME_OTHER
   if (cacheMinutes(await $.clock.now()) === 0) {
     const answer = await $.ui
-      .ask('Cache miss: контекст кешується заново і це коштує. Все одно продовжити?', [CONTINUE, 'Скасувати'])
+      .ask(tr.resumeAsk, [tr.yes, tr.no])
       .catch(() => '')
-    if (answer !== CONTINUE) return
+    if (answer !== tr.yes) return
   }
   await note($, `resume → ${text}`)
   await $.prompt.submit({ text, asUser: true })
@@ -402,7 +476,7 @@ async function pick($: EngineInterface, zone: 'model' | 'effort', dir: number) {
     return
   }
   if (!hasEffort(model)) {
-    $.ui.toast('Haiku не має effort')
+    $.ui.toast(tr.noEffort)
     return
   }
   const i = EFFORTS.indexOf(p.effort || cur.effort)
@@ -460,6 +534,7 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const r = await next(e)
+    await applyLang($).catch(err => note($, `lang failed ${String(err)}`))
     $.clock.every(1000, () => void poll($))
     try {
       const u = await $.session.usage()
@@ -567,7 +642,7 @@ export const register: Register = on => {
               const c = tone(l.percentUsed)
               const n = Math.round(Math.min(l.percentUsed, 100) / 10)
               return pill(l.kind, [
-                <Text key="n" dimColor>{shortNames[l.kind] ?? l.kind}</Text>,
+                <Text key="n" dimColor>{shortName(l.kind)}</Text>,
                 <Text key="b">
                   <Text color={c}>{'━'.repeat(n)}</Text>
                   <Text color="gray">{'─'.repeat(10 - n)}</Text>
@@ -604,7 +679,7 @@ export const register: Register = on => {
     const effortColor = isOn && f >= 0 ? EFFORT_COLORS[f] : 'gray'
     return (
       <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap={1} width={e.props.bodyColumns}>
-        <Button key="to-pane" plain dimColor label="колесо ⇥" onPress={() => openPane($, 'button')} />
+        <Button key="to-pane" plain dimColor label={tr.toPane} onPress={() => openPane($, 'button')} />
         <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={hue} paddingX={1}>
           <Button key="m-prev" plain dimColor label="◀" onPress={() => pick($, 'model', -1)} />
           <Text bold color={hue}>
@@ -632,7 +707,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'ClauDiscombobulating' }, async $ => {
     const opened = await $.ui.open({ id: PANE, title: 'ClauDiscombobulating', columns: PANE_COLS })
-    return { text: opened.isPlaced ? 'Панель відкрита.' : 'Панель чекає на ширший термінал.' }
+    return { text: opened.isPlaced ? tr.paneOpen : tr.paneWaits }
   })
 
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
@@ -683,17 +758,17 @@ export const register: Register = on => {
           <Text color="#3a3a48">{'─'.repeat(Math.max(4, width - 4))}</Text>
           {isArmed ? (
             <Text color="#9a9aab" wrap="truncate-end">
-              «{alarm.text}» · через {inFor(alarm.at - Date.now())}
+              «{alarm.text}» · {tr.via} {inFor(alarm.at - Date.now())}
             </Text>
           ) : (
-            <Input key="timer-text" placeholder="текст повідомлення" submitLabel="" value={alarm.text} onInput={v => update($, timer, t => ({ ...t, text: v }))} onSubmit={async v => { await update($, timer, t => ({ ...t, text: v || t.text })); await armTimer($) }} />
+            <Input key="timer-text" placeholder={tr.placeholder} submitLabel="" value={alarm.text} onInput={v => update($, timer, t => ({ ...t, text: v }))} onSubmit={async v => { await update($, timer, t => ({ ...t, text: v || t.text })); await armTimer($) }} />
           )}
           <Text color="#3a3a48">{'─'.repeat(Math.max(4, width - 4))}</Text>
           <Box flexDirection="row" justifyContent="center">
             {isArmed ? (
-              <Button key="timer-cancel" plain label="✕  скасувати" onPress={() => update($, timer, t => ({ ...t, at: 0 }))} />
+              <Button key="timer-cancel" plain label={tr.cancelBtn} onPress={() => update($, timer, t => ({ ...t, at: 0 }))} />
             ) : (
-              <Button key="timer-arm" plain label="✓  відправити" onPress={() => armTimer($)} />
+              <Button key="timer-arm" plain label={tr.sendBtn} onPress={() => armTimer($)} />
             )}
           </Box>
         </Box>
@@ -747,7 +822,7 @@ export const register: Register = on => {
     const now = Date.now()
     const isAt = await read($, showResetAt)
     const five = ls.find(l => l.kind === 'five_hour')?.resetsAt
-    const fiveLabel = five ? (isAt ? `о ${two(new Date(five).getHours())}:${two(new Date(five).getMinutes())}` : resetIn(five, now)) : ''
+    const fiveLabel = five ? (isAt ? `${tr.at} ${two(new Date(five).getHours())}:${two(new Date(five).getMinutes())}` : resetIn(five, now)) : ''
     return (
       <Box flexDirection="row" gap={2}>
         {e.props.modes.length > 0 ? <Text dimColor>{e.props.modes.join(' & ')}</Text> : null}
@@ -757,7 +832,7 @@ export const register: Register = on => {
           return (
             <Box key={l.kind} flexDirection="row">
             <Text>
-              <Text dimColor>{shortNames[l.kind] ?? l.kind} </Text>
+              <Text dimColor>{shortName(l.kind)} </Text>
               <Text color={tone(l.percentUsed)}>{'━'.repeat(n)}</Text>
               <Text color="gray">{'─'.repeat(10 - n)}</Text>
               <Text bold color={tone(l.percentUsed)}> {Math.round(l.percentUsed)}%</Text>

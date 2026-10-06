@@ -9,6 +9,7 @@ async function boot($: any, on: any, answer: string) {
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('settings.read', () => ({ value: {} }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [] } }))
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'CLAUDISCOMBOBULATING_LANG' ? 'uk' : undefined }))
   on('tool.register', (_$: any, e: any) => ({ value: { tool: e.name } }))
   on('command.register', (_$: any, e: any) => ({ value: { command: e.name } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
