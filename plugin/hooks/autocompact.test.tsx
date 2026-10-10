@@ -12,7 +12,8 @@ async function setup($: any, on: any, busy: boolean, startPct = 96) {
   on('turn.complete', () => ({ text: '' }))
   on('turn.abort', (_$: any, e: any) => {
     ran.push(`abort ${e.turnId}`)
-    return undefined as any
+    // engine skips a hook that returns neither { value } nor { deny } — 2026-10-10
+    return { value: undefined }
   })
   on('ui.toast', () => ({ value: undefined }))
   on('env.get', () => ({ value: undefined }))
