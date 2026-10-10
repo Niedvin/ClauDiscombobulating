@@ -42,7 +42,7 @@ const UK = {
   via: 'через',
   alertBody: 'Кеш: лишилось 10 хв',
   armed: (t: string) => `Повідомлення піде о ${t}`,
-  compactOnSonnet: 'Cache miss: compact на Sonnet low',
+  compactOnHaiku: 'Cache miss: compact на Haiku',
   compactFailed: 'Compact не вдався',
   autoCompact: (p: number) => `Ліміт 5г ${p}%: стоп і compact`,
   resumeFailed: 'Не вдалося відкрити /resume',
@@ -67,7 +67,7 @@ const EN: typeof UK = {
   via: 'in',
   alertBody: 'Cache: 10 min left',
   armed: t => `Message will be sent at ${t}`,
-  compactOnSonnet: 'Cache miss: compacting on Sonnet low',
+  compactOnHaiku: 'Cache miss: compacting on Haiku',
   compactFailed: 'Compact failed',
   autoCompact: p => `5h limit ${p}%: stopping to compact`,
   resumeFailed: 'Could not open /resume',
@@ -268,14 +268,16 @@ async function compact($: EngineInterface): Promise<boolean> {
   const effort = (await read($, live)).effort || (isLevel(flagged) ? flagged : await savedEffort($, model))
   const fam = MODELS[modelIndex(model)]
   const isMiss = cacheMinutes(await $.clock.now()) === 0
-  const isSwitch = isMiss && fam?.family !== 'sonnet'
+  // haiku takes the whole 1M window now and is the cheap one to re-read the context on — 2026-10-10
+  const isSwitch = isMiss && fam?.family !== 'haiku'
+  const onHaiku = isSwitch || fam?.family === 'haiku'
   try {
     if (isSwitch) {
-      $.ui.toast(tr.compactOnSonnet)
-      await $.command.run({ command: 'model', args: 'sonnet' })
+      $.ui.toast(tr.compactOnHaiku)
+      await $.command.run({ command: 'model', args: 'haiku' })
     }
-    // a model switch makes the app re-send its own effort, so low is set after it — 2026-10-06
-    if (isSwitch || effort !== 'low') await $.command.run({ command: 'effort', args: 'low' })
+    // low goes after a model switch: the app re-sends its own effort then; haiku has none — 2026-10-10
+    if (!onHaiku && effort !== 'low') await $.command.run({ command: 'effort', args: 'low' })
     await $.command.run({ command: 'compact' })
     const doneAt = await $.clock.now()
     await update($, compactedAt, () => doneAt)

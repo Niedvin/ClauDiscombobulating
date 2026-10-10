@@ -17,7 +17,7 @@ async function run($: any, on: any, clock: any, idleMin: number, model: string, 
   on('turn.complete', () => ({ text: '' }))
   on('command.run', (_$: any, e: any) => {
     ran.push(`${e.command} ${e.args}`.trim())
-    if (e.command === 'model') current = e.args === 'sonnet' ? 'claude-sonnet-5-5' : e.args === 'opus' ? 'claude-opus-5-5' : e.args
+    if (e.command === 'model') current = e.args === 'haiku' ? 'claude-haiku-5-5' : e.args === 'opus' ? 'claude-opus-5-5' : e.args
     return { text: e.command === 'effort' ? `Set effort level to ${e.args} (this session only): x` : `Set model to ${e.args}` }
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -35,13 +35,18 @@ test('compact on cache hit: effort low, compact, effort back', { timeoutMs: 2000
   expect(await run($, on, clock, 10, 'claude-opus-5-5', 'xhigh')).toEqual(['effort low', 'compact', 'effort xhigh'])
 })
 
-test('compact on cache miss: sonnet low, compact, model and effort back', { timeoutMs: 20000 }, async ($, on) => {
+test('compact on cache miss: haiku, compact, model and effort back', { timeoutMs: 20000 }, async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
-  expect(await run($, on, clock, 61, 'claude-opus-5-5', 'xhigh')).toEqual(['model sonnet', 'effort low', 'compact', 'model opus', 'effort xhigh'])
+  expect(await run($, on, clock, 61, 'claude-opus-5-5', 'xhigh')).toEqual(['model haiku', 'compact', 'model opus', 'effort xhigh'])
 })
 
-test('compact on cache miss while already on sonnet keeps the model', { timeoutMs: 20000 }, async ($, on) => {
+test('compact on cache miss while already on haiku keeps the model, no effort calls', { timeoutMs: 20000 }, async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
-  expect(await run($, on, clock, 61, 'claude-sonnet-5-5', 'high')).toEqual(['effort low', 'compact', 'effort high'])
+  expect(await run($, on, clock, 61, 'claude-haiku-5-5', '')).toEqual(['compact'])
+})
+
+test('compact on cache hit while on haiku: no effort calls', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  expect(await run($, on, clock, 10, 'claude-haiku-5-5', '')).toEqual(['compact'])
 })
 
