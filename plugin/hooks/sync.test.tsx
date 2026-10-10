@@ -75,3 +75,32 @@ test(`cache timer on ${surface}: 55 down to 0, terminal hides first 5 min`, { ti
 })
 }
 
+test('cache timer restarts at a compact', { timeoutMs: 20000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('settings.read', () => ({ value: {} }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: 10 }] } }))
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'CLAUDISCOMBOBULATING_LANG' ? 'uk' : undefined }))
+  on('tool.register', (_$, e) => ({ value: { tool: e.name } }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: [] }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('session.compact', () => ({ messages: [{ role: 'assistant', text: 'summary', toolUses: [] }] }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const mode = await $.ui.mount({ plugin: 'ClauDiscombobulating', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const text = async () => JSON.stringify(await mode.drawn())
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(61 * 60000)
+  expect(await text()).toContain('⚠ Cache Miss')
+
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] })
+  await clock.advance(60000)
+  expect(await text()).not.toContain('Cache Miss')
+  await clock.advance(9 * 60000)
+  expect(await text()).toContain('кеш 50хв')
+})
+

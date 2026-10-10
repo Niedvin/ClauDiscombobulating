@@ -617,6 +617,9 @@ export const register: Register = on => {
         const doneAt = await $.clock.now()
         await update($, compactedAt, () => doneAt)
         await update($, sinceCompact, () => 0)
+        // compaction is its own API request, so the 1h cache timer restarts here — 2026-10-10
+        lastActive = doneAt
+        await update($, activeAt, () => doneAt)
       } catch {}
     }
     return r
