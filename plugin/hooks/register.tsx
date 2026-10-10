@@ -47,7 +47,6 @@ const UK = {
   autoCompact: (p: number) => `Ліміт 5г ${p}%: стоп і compact`,
   resumeFailed: 'Не вдалося відкрити /resume',
   resumeAsk: 'Cache miss: контекст кешується заново і це коштує. Все одно продовжити?',
-  noEffort: 'Haiku не має effort',
   toPane: 'колесо ⇥',
   paneOpen: 'Панель відкрита.',
   paneWaits: 'Панель чекає на ширший термінал.',
@@ -72,7 +71,6 @@ const EN: typeof UK = {
   autoCompact: p => `5h limit ${p}%: stopping to compact`,
   resumeFailed: 'Could not open /resume',
   resumeAsk: 'Cache miss: the context is cached again, which costs tokens. Continue anyway?',
-  noEffort: 'Haiku has no effort',
   toPane: 'wheel ⇥',
   paneOpen: 'Pane opened.',
   paneWaits: 'Pane waits for a wider terminal.',
@@ -111,7 +109,6 @@ function modelLabel(id: string) {
   const fam = MODELS[modelIndex(id)]?.family
   return versionLabel(id) ?? (fam ? labels[fam] ?? cap(fam) : id || '…')
 }
-const hasEffort = (id: string) => !id.toLowerCase().includes('haiku')
 const isLevel = (v: unknown): v is string => typeof v === 'string' && EFFORTS.includes(v)
 const within = (row: number, [a, b]: number[]) => row >= a && row <= b
 const wrap = (i: number, n: number) => ((i % n) + n) % n
@@ -270,14 +267,15 @@ async function compact($: EngineInterface): Promise<boolean> {
   const isMiss = cacheMinutes(await $.clock.now()) === 0
   // haiku takes the whole 1M window now and is the cheap one to re-read the context on — 2026-10-10
   const isSwitch = isMiss && fam?.family !== 'haiku'
-  const onHaiku = isSwitch || fam?.family === 'haiku'
+  // medium on a miss: the summary decides what the context keeps, so it is worth the thinking — 2026-10-10
+  const target = isMiss ? 'medium' : 'low'
   try {
     if (isSwitch) {
       $.ui.toast(tr.compactOnHaiku)
       await $.command.run({ command: 'model', args: 'haiku' })
     }
-    // low goes after a model switch: the app re-sends its own effort then; haiku has none — 2026-10-10
-    if (!onHaiku && effort !== 'low') await $.command.run({ command: 'effort', args: 'low' })
+    // effort goes after a model switch: the app re-sends its own at every switch — 2026-10-10
+    if (effort !== target) await $.command.run({ command: 'effort', args: target })
     await $.command.run({ command: 'compact' })
     const doneAt = await $.clock.now()
     await update($, compactedAt, () => doneAt)
@@ -295,7 +293,7 @@ async function compact($: EngineInterface): Promise<boolean> {
       await $.command.run({ command: 'model', args: fam?.id ?? model }).catch(() => undefined)
       await update($, live, l => ({ ...l, model }))
     }
-    if (isLevel(effort) && (isSwitch || effort !== 'low') && hasEffort(model)) {
+    if (isLevel(effort) && (isSwitch || effort !== target)) {
       await $.command.run({ command: 'effort', args: effort }).catch(() => undefined)
       await update($, live, l => ({ ...l, effort }))
     }
@@ -505,10 +503,6 @@ async function pick($: EngineInterface, zone: 'model' | 'effort', dir: number) {
     await update($, pending, q => ({ ...q, model: target }))
     modelTimer?.cancel()
     modelTimer = $.clock.after(APPLY_MS, () => void applyModel($))
-    return
-  }
-  if (!hasEffort(model)) {
-    $.ui.toast(tr.noEffort)
     return
   }
   const i = EFFORTS.indexOf(p.effort || cur.effort)
@@ -737,9 +731,8 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const i = modelIndex(model)
     const hue = MODELS[i]?.hue ?? 'gray'
-    const isOn = hasEffort(model)
     const f = EFFORTS.indexOf(effort)
-    const effortColor = isOn && f >= 0 ? EFFORT_COLORS[f] : 'gray'
+    const effortColor = f >= 0 ? EFFORT_COLORS[f] : 'gray'
     return (
       <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap={1} width={e.props.bodyColumns}>
         {label ? <Text dimColor>{label}</Text> : null}
@@ -757,12 +750,12 @@ export const register: Register = on => {
             <Box flexDirection="row" alignItems="center" gap={1} borderStyle="round" borderColor={effortColor} paddingX={1}>
               <Button key="e-prev" plain dimColor label="◀" onPress={() => pick($, 'effort', -1)} />
               <Text bold color={effortColor}>
-                {isOn ? effort || 'auto' : 'n/a'}
+                {effort || 'auto'}
                 {p.effort ? ' •' : ''}
               </Text>
               <Text>
                 {EFFORTS.map((lv, k) => (
-                  <Text key={lv} color={isOn && f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k]}</Text>
+                  <Text key={lv} color={f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k]}</Text>
                 ))}
               </Text>
               <Button key="e-next" plain dimColor label="▶" onPress={() => pick($, 'effort', 1)} />
@@ -811,9 +804,8 @@ export const register: Register = on => {
     const effort = p.effort || cur.effort
     const i = modelIndex(model)
     const hue = MODELS[i]?.hue ?? 'gray'
-    const isOn = hasEffort(model)
     const f = EFFORTS.indexOf(effort)
-    const effortColor = isOn && f >= 0 ? EFFORT_COLORS[f] : 'gray'
+    const effortColor = f >= 0 ? EFFORT_COLORS[f] : 'gray'
     const width = Math.max(18, e.props.bodyColumns)
     const rows = e.props.scroll.bodyRows
     const height = Math.max(rows, CARDS_ROWS)
@@ -876,12 +868,12 @@ export const register: Register = on => {
         <Box height={1} />
         <Box flexDirection="column" alignItems="center" justifyContent="center" borderStyle="round" borderColor={effortColor} backgroundColor="black" width={width}>
           <Text bold color={effortColor}>
-            {isOn ? effort || 'auto' : 'n/a'}
+            {effort || 'auto'}
             {p.effort ? ' •' : ''}
           </Text>
           <Text>
             {EFFORTS.map((lv, k) => (
-              <Text key={lv} color={isOn && f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k].repeat(2)} </Text>
+              <Text key={lv} color={f >= 0 && k <= f ? EFFORT_COLORS[k] : 'gray'}>{'▁▃▄▆█'[k].repeat(2)} </Text>
             ))}
           </Text>
         </Box>
